@@ -6,8 +6,14 @@
   "build": {
     "frontendDist": "src-ui/dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "cd src-ui && yarn dev",
-    "beforeBuildCommand": "cd src-ui && yarn build"
+    "beforeDevCommand": {
+      "script": "yarn dev",
+      "cwd": "src-ui"
+    },
+    "beforeBuildCommand": {
+      "script": "yarn build",
+      "cwd": "src-ui"
+    }
   },
   "app": {
     "withGlobalTauri": false,
