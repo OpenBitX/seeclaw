@@ -5,6 +5,7 @@ import Chip from '@mui/joy/Chip';
 import Typography from '@mui/joy/Typography';
 import IconButton from '@mui/joy/IconButton';
 import Box from '@mui/joy/Box';
+import { ChevronUp, ChevronDown } from 'lucide-react';
 import type { ActionCard as ActionCardType } from '../../types/agent';
 
 const ACTION_LABELS: Record<string, string> = {
@@ -67,7 +68,7 @@ export function ActionCard({ card }: Props) {
             {getActionSummary(card.action)}
           </Typography>
           <IconButton size="sm" variant="plain">
-            {expanded ? '▲' : '▼'}
+            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </IconButton>
         </Box>
 

@@ -3,6 +3,7 @@ import { observer } from 'mobx-react-lite';
 import Box from '@mui/joy/Box';
 import Textarea from '@mui/joy/Textarea';
 import IconButton from '@mui/joy/IconButton';
+import { ArrowUp, Square } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { agentStore } from '../../store/AgentStore';
 
@@ -81,7 +82,7 @@ export const InputBar = observer(() => {
             title="停止"
             sx={{ mb: 0.25 }}
           >
-            ■
+            <Square size={16} />
           </IconButton>
         ) : (
           <IconButton
@@ -92,7 +93,7 @@ export const InputBar = observer(() => {
             title="发送"
             sx={{ mb: 0.25 }}
           >
-            ↑
+            <ArrowUp size={16} />
           </IconButton>
         )}
       </Box>

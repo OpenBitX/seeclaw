@@ -24,6 +24,7 @@ class SettingsStore {
   settings: AppSettings = DEFAULT_SETTINGS;
   isLoading = false;
   isSettingsOpen = false;
+  permanentlyAllowed: string[] = [];
 
   constructor() {
     makeAutoObservable(this);
@@ -51,6 +52,16 @@ class SettingsStore {
 
   setTheme(theme: 'light' | 'dark' | 'system'): void {
     this.settings = { ...this.settings, theme };
+  }
+
+  addPermanentlyAllowed(actionType: string): void {
+    if (!this.permanentlyAllowed.includes(actionType)) {
+      this.permanentlyAllowed.push(actionType);
+    }
+  }
+
+  removePermanentlyAllowed(actionType: string): void {
+    this.permanentlyAllowed = this.permanentlyAllowed.filter((t) => t !== actionType);
   }
 }
 

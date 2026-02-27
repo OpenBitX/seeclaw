@@ -6,18 +6,27 @@ import Button from '@mui/joy/Button';
 import Box from '@mui/joy/Box';
 import { invoke } from '@tauri-apps/api/core';
 import { agentStore } from '../../store/AgentStore';
+import { settingsStore } from '../../store/SettingsStore';
 
 export const ApprovalCard = observer(() => {
   const { pendingApproval } = agentStore;
 
-  const handleApprove = async () => {
+  const handleDeny = async () => {
+    await invoke('confirm_action', { approved: false });
+    agentStore.setApprovalRequest(null);
+  };
+
+  const handleAllowOnce = async () => {
     await invoke('confirm_action', { approved: true });
     agentStore.setApprovalRequest(null);
   };
 
-  const handleDeny = async () => {
-    await invoke('confirm_action', { approved: false });
-    agentStore.setApprovalRequest(null);
+  const handlePermanentlyAllow = async () => {
+    if (pendingApproval) {
+      settingsStore.addPermanentlyAllowed(pendingApproval.action.type);
+      await invoke('confirm_action', { approved: true });
+      agentStore.setApprovalRequest(null);
+    }
   };
 
   return (
@@ -55,6 +64,11 @@ export const ApprovalCard = observer(() => {
             >
               {JSON.stringify(pendingApproval.action, null, 2)}
             </Box>
+            {pendingApproval.reason && (
+              <Typography level="body-xs" sx={{ mb: 1, color: 'text.secondary' }}>
+                {pendingApproval.reason}
+              </Typography>
+            )}
             <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
               <Button
                 variant="outlined"
@@ -65,12 +79,20 @@ export const ApprovalCard = observer(() => {
                 拒绝
               </Button>
               <Button
+                variant="outlined"
+                color="warning"
+                size="sm"
+                onClick={handleAllowOnce}
+              >
+                执行一次
+              </Button>
+              <Button
                 variant="solid"
                 color="danger"
                 size="sm"
-                onClick={handleApprove}
+                onClick={handlePermanentlyAllow}
               >
-                允许执行
+                永久允许
               </Button>
             </Box>
           </Card>

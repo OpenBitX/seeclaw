@@ -83,6 +83,31 @@ export function StreamingMessage({ message }: Props) {
           ))}
         </Box>
       )}
+
+      {message.screenshotBase64 && (
+        <Box sx={{ mt: 1.5 }}>
+          <Typography
+            level="body-xs"
+            sx={{ color: 'text.tertiary', mb: 0.5 }}
+          >
+            视野快照
+            {message.gridN ? ` · ${message.gridN}×${message.gridN} 网格` : ''}
+          </Typography>
+          <Box
+            component="img"
+            src={`data:image/png;base64,${message.screenshotBase64}`}
+            alt="viewport screenshot"
+            sx={{
+              width: '100%',
+              maxWidth: 640,
+              borderRadius: 'sm',
+              border: '1px solid',
+              borderColor: 'divider',
+              display: 'block',
+            }}
+          />
+        </Box>
+      )}
     </Box>
   );
 }

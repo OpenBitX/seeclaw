@@ -6,6 +6,7 @@ import type {
   Message,
   StreamChunk,
   ApprovalRequest,
+  ViewportCapturedPayload,
 } from '../types/agent';
 
 class AgentStore {
@@ -18,6 +19,7 @@ class AgentStore {
   pendingApproval: ApprovalRequest | null = null;
 
   private currentStreamingId: string | null = null;
+  private streamStartedAt: number | null = null;
 
   constructor() {
     makeAutoObservable(this);
@@ -55,20 +57,31 @@ class AgentStore {
     };
     this.messages.push(msg);
     this.currentStreamingId = id;
+    this.streamStartedAt = null;
     return id;
   }
 
   handleStreamChunk(chunk: StreamChunk): void {
-    if (!this.currentStreamingId) return;
+    // Auto-start a message slot if state event arrived late.
+    if (!this.currentStreamingId) {
+      if (chunk.kind === 'done' || chunk.kind === 'error') return;
+      this.startAssistantMessage();
+    }
     const msg = this.messages.find((m) => m.id === this.currentStreamingId);
     if (!msg) return;
 
     runInAction(() => {
       if (chunk.kind === 'reasoning') {
+        if (this.streamStartedAt === null) this.streamStartedAt = Date.now();
         msg.reasoningContent = (msg.reasoningContent ?? '') + chunk.content;
       } else if (chunk.kind === 'content') {
+        if (this.streamStartedAt === null) this.streamStartedAt = Date.now();
         msg.content += chunk.content;
       } else if (chunk.kind === 'done' || chunk.kind === 'error') {
+        if (this.streamStartedAt !== null) {
+          msg.durationMs = Date.now() - this.streamStartedAt;
+          this.streamStartedAt = null;
+        }
         msg.isStreaming = false;
         this.currentStreamingId = null;
       }
@@ -107,6 +120,35 @@ class AgentStore {
     }
   }
 
+  /**
+   * Called when the backend emits `viewport_captured`.
+   * Attaches the screenshot to the most recent assistant message (or creates a tool message).
+   */
+  handleViewportCaptured(payload: ViewportCapturedPayload): void {
+    runInAction(() => {
+      // Try to attach to the current streaming message first
+      const target = this.currentStreamingId
+        ? this.messages.find((m) => m.id === this.currentStreamingId)
+        : this.messages.slice().reverse().find((m) => m.role === 'assistant');
+
+      if (target) {
+        target.screenshotBase64 = payload.image_base64;
+        target.gridN = payload.grid_n;
+      } else {
+        // No assistant message yet — create a standalone tool message to show the screenshot
+        this.messages.push({
+          id: crypto.randomUUID(),
+          role: 'tool',
+          content: '',
+          timestamp: new Date().toISOString(),
+          isStreaming: false,
+          screenshotBase64: payload.image_base64,
+          gridN: payload.grid_n,
+        });
+      }
+    });
+  }
+
   reset(): void {
     this.state = 'idle';
     this.messages = [];
@@ -115,6 +157,7 @@ class AgentStore {
     this.elapsedMs = 0;
     this.pendingApproval = null;
     this.currentStreamingId = null;
+    this.streamStartedAt = null;
   }
 }
 

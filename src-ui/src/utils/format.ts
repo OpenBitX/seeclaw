@@ -1,4 +1,15 @@
 /**
+ * Formats elapsed milliseconds into [T:mm:ss] notation for display next to message timestamps.
+ * Sub-minute durations are shown as [T:00:ss], e.g. [T:00:03].
+ */
+export function formatDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `[T:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}]`;
+}
+
+/**
  * Formats elapsed milliseconds into a human-readable string (e.g. "2m 34s").
  */
 export function formatElapsed(ms: number): string {

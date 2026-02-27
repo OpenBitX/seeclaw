@@ -59,6 +59,19 @@ export interface Message {
   actionCards?: ActionCard[];
   timestamp: string;
   isStreaming: boolean;
+  /** Milliseconds from first chunk to done, only set on completed assistant messages */
+  durationMs?: number;
+  /** Base64-encoded PNG of the viewport captured by get_viewport */
+  screenshotBase64?: string;
+  /** Grid size used when screenshotBase64 was captured */
+  gridN?: number;
+}
+
+export interface ViewportCapturedPayload {
+  image_base64: string;
+  grid_n: number;
+  physical_width: number;
+  physical_height: number;
 }
 
 export interface ApprovalRequest {
@@ -66,4 +79,9 @@ export interface ApprovalRequest {
   action: AgentAction;
   reason: string;
   timestamp: string;
+}
+
+/** Rust backend emits AgentState as `{ state: "idle" | "routing" | ... }` */
+export interface AgentStatePayload {
+  state: AgentStateKind;
 }

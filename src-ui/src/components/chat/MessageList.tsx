@@ -6,7 +6,7 @@ import Typography from '@mui/joy/Typography';
 import { agentStore } from '../../store/AgentStore';
 import { StreamingMessage } from './StreamingMessage';
 import { ApprovalCard } from '../shared/ApprovalCard';
-import { formatTimestamp } from '../../utils/format';
+import { formatTimestamp, formatDuration } from '../../utils/format';
 
 export const MessageList = observer(() => {
   const { messages } = agentStore;
@@ -51,8 +51,6 @@ export const MessageList = observer(() => {
         gap: 0,
       }}
     >
-      <ApprovalCard />
-
       <AnimatePresence initial={false}>
         {messages.map((msg) => (
           <motion.div
@@ -83,18 +81,42 @@ export const MessageList = observer(() => {
                     {msg.content}
                   </Typography>
                 </Box>
+              ) : msg.role === 'tool' && msg.screenshotBase64 ? (
+                <Box sx={{ width: '100%', maxWidth: 680 }}>
+                  <Typography level="body-xs" sx={{ color: 'text.tertiary', mb: 0.5 }}>
+                    视野快照{msg.gridN ? ` · ${msg.gridN}×${msg.gridN} 网格` : ''}
+                  </Typography>
+                  <Box
+                    component="img"
+                    src={`data:image/png;base64,${msg.screenshotBase64}`}
+                    alt="viewport screenshot"
+                    sx={{
+                      width: '100%',
+                      maxWidth: 640,
+                      borderRadius: 'sm',
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      display: 'block',
+                    }}
+                  />
+                </Box>
               ) : (
                 <Box sx={{ width: '100%', maxWidth: 680 }}>
                   <StreamingMessage message={msg} />
                 </Box>
               )}
-              <Typography level="body-xs" sx={{ mt: 0.5, color: 'text.tertiary' }}>
-                {formatTimestamp(msg.timestamp)}
+              <Typography level="body-xs" sx={{ mt: 0.5, color: 'text.tertiary', display: 'flex', gap: 0.75 }}>
+                <span>{formatTimestamp(msg.timestamp)}</span>
+                {msg.role === 'assistant' && msg.durationMs !== undefined && (
+                  <span style={{ opacity: 0.6 }}>{formatDuration(msg.durationMs)}</span>
+                )}
               </Typography>
             </Box>
           </motion.div>
         ))}
       </AnimatePresence>
+
+      <ApprovalCard />
 
       <div ref={bottomRef} />
     </Box>
