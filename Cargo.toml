@@ -5,6 +5,9 @@ edition = "2021"
 description = "SeeClaw — Desktop GUI Automation Agent"
 license = "MIT"
 
+[package.metadata.tauri]
+bundle = {}
+
 [lib]
 name = "seeclaw_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
@@ -28,6 +31,10 @@ dotenvy = "0.15"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 base64 = "0.22"
+dirs = "5"
+xcap = "0.0"
+image = "0.25"
+enigo = "0.2"
 
 [profile.release]
 opt-level = 3

@@ -63,6 +63,14 @@ pub struct StreamChunk {
     pub content: String,
 }
 
+/// The fully-accumulated response returned by `LlmProvider::chat`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LlmResponse {
+    pub content: String,
+    pub reasoning: String,
+    pub tool_calls: Vec<ToolCall>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StreamChunkKind {
@@ -78,5 +86,15 @@ pub struct ProviderConfig {
     pub display_name: String,
     pub api_base: String,
     pub model: String,
-    pub temperature: f32,
+    pub temperature: f64,
+}
+
+/// Per-call configuration that controls which model to use and how to call it.
+#[derive(Debug, Clone)]
+pub struct CallConfig {
+    /// Model identifier sent to the API (e.g. "GLM-4.7-Flash").
+    pub model: String,
+    /// Whether to use SSE streaming; non-streaming returns a single JSON response.
+    pub stream: bool,
+    pub temperature: f64,
 }

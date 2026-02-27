@@ -109,8 +109,7 @@
         "type": "object",
         "properties": {
           "annotate": { "type": "boolean", "description": "If true, draw bounding boxes and IDs on the screenshot." }
-        },
-        "required": []
+        }
       }
     }
   },
@@ -139,7 +138,7 @@
         "properties": {
           "server_name": { "type": "string", "description": "MCP server name as defined in config.toml." },
           "tool_name": { "type": "string" },
-          "arguments": { "type": "object" }
+          "arguments": { "type": "object", "additionalProperties": true }
         },
         "required": ["server_name", "tool_name", "arguments"]
       }
@@ -154,7 +153,7 @@
         "type": "object",
         "properties": {
           "skill_name": { "type": "string", "description": "Skill name as registered in the skills/ directory." },
-          "inputs": { "type": "object", "description": "Named input variables the skill requires." }
+          "inputs": { "type": "object", "additionalProperties": true, "description": "Named input variables the skill requires." }
         },
         "required": ["skill_name", "inputs"]
       }
