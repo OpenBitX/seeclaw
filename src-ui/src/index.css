@@ -13,18 +13,55 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-html,
-body,
+html {
+  height: 100%;
+  background: transparent;
+}
+
+/* body transparent so the window chrome shows our #root bg + radius */
+body {
+  height: 100%;
+  background: transparent !important;
+  overflow: visible; /* allow #root shadow to bleed out */
+}
+
 #root {
   height: 100%;
   width: 100%;
   overflow: hidden;
+  border-radius: 10px;
+  /*
+   * Layered natural window shadow:
+   *  layer 1 — thin close-contact shadow (sharpens edge)
+   *  layer 2 — mid-range soft lift
+   *  layer 3 — broad ambient diffusion
+   * The OS native shadow (DWM) handles the outermost glow;
+   * these CSS layers fill in the gap at the border radius edge.
+   */
+  box-shadow:
+    0 1px 3px  rgba(0, 0, 0, 0.08),
+    0 4px 12px rgba(0, 0, 0, 0.10),
+    0 16px 40px rgba(0, 0, 0, 0.12);
+}
+
+/* Brand-toned text selection */
+::selection {
+  background: rgba(90, 70, 50, 0.16);
+  color: inherit;
+}
+
+/*
+ * Remove the browser's default focus ring for mouse/touch clicks.
+ * Keyboard navigation (Tab key) still shows :focus-visible outline for a11y.
+ */
+:focus:not(:focus-visible) {
+  outline: none !important;
 }
 
 /* Custom scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {

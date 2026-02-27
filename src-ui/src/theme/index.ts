@@ -17,12 +17,12 @@ export const theme = extendTheme({
           900: '#101010',
         },
         background: {
-          body: '#ffffff',
-          surface: '#f8f7f4',
-          popup: '#ffffff',
-          level1: '#f0efec',
-          level2: '#e8e7e4',
-          level3: '#e0deda',
+          body: '#F1EDE5',    // warm parchment — main content area
+          surface: '#FDFDFD', // near-white — header / elevated surfaces
+          popup: '#FDFDFD',   // dialogs
+          level1: '#EAE6DE',
+          level2: '#E3DFD7',
+          level3: '#DBD7CF',
         },
         text: {
           primary: '#1a1a1a',
@@ -151,6 +151,14 @@ export const theme = extendTheme({
         root: {
           borderRadius: '8px',
           boxShadow: 'none',
+        },
+      },
+    },
+    // Ensure Select dropdowns always float above modals/dialogs
+    JoySelect: {
+      defaultProps: {
+        slotProps: {
+          listbox: { sx: { zIndex: 9999 } },
         },
       },
     },

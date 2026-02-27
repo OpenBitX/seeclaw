@@ -1,0 +1,79 @@
+{
+  "zhipu": {
+    "displayName": "智谱 GLM",
+    "models": [
+      "glm-4-flash",
+      "glm-4.7-flash",
+      "glm-4-flash-250414",
+      "glm-4.6v-flash",
+      "glm-4.1v-thinking-flash",
+      "glm-4-plus",
+      "glm-4-long",
+      "glm-4-air",
+      "glm-4-airx",
+      "glm-4.6v",
+      "glm-4v-flash",
+      "glm-z1-flash",
+      "glm-z1-air"
+    ]
+  },
+  "anthropic": {
+    "displayName": "Anthropic Claude",
+    "models": [
+      "claude-opus-4-5",
+      "claude-sonnet-4-5",
+      "claude-haiku-3-5",
+      "claude-3-5-sonnet-20241022",
+      "claude-3-5-haiku-20241022",
+      "claude-3-opus-20240229"
+    ]
+  },
+  "deepseek": {
+    "displayName": "DeepSeek",
+    "models": [
+      "deepseek-chat",
+      "deepseek-reasoner",
+      "deepseek-coder-v2"
+    ]
+  },
+  "openai": {
+    "displayName": "OpenAI",
+    "models": [
+      "gpt-4o",
+      "gpt-4o-mini",
+      "gpt-4-turbo",
+      "o1",
+      "o1-mini",
+      "o3",
+      "o3-mini",
+      "o4-mini"
+    ]
+  },
+  "openrouter": {
+    "displayName": "OpenRouter",
+    "models": [
+      "openai/gpt-4o",
+      "openai/o4-mini",
+      "anthropic/claude-opus-4-5",
+      "anthropic/claude-sonnet-4-5",
+      "google/gemini-2.5-pro-preview",
+      "google/gemini-2.5-flash-preview",
+      "deepseek/deepseek-r1",
+      "deepseek/deepseek-chat-v3-0324",
+      "meta-llama/llama-3.3-70b-instruct"
+    ]
+  },
+  "qwen": {
+    "displayName": "阿里云 Qwen",
+    "models": [
+      "qwen-max",
+      "qwen-max-latest",
+      "qwen-plus",
+      "qwen-turbo",
+      "qwen-long",
+      "qwen-vl-max",
+      "qwen2.5-72b-instruct",
+      "qwen2.5-vl-72b-instruct"
+    ]
+  }
+}

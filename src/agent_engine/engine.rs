@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use base64::Engine as _;
 use tauri::{AppHandle, Emitter, Wry};
+use tokio::process::Command;
 use tokio::sync::{mpsc, Mutex};
 
 use crate::agent_engine::history::{HistoryEntry, SessionHistory};
@@ -19,16 +20,7 @@ use crate::perception::types::ScreenshotMeta;
 
 const GRID_N: u32 = 12;
 
-const SYSTEM_PROMPT: &str = "\
-You are SeeClaw, a desktop GUI automation agent running on Windows.
-
-Rules:
-- Always call `get_viewport` first to see the current screen state before clicking.
-- Use the grid cell label (e.g. \"C4\") as the `element_id` for all click/scroll actions.
-- After completing a click, call `finish_task` with a brief summary.
-- If you cannot find the target, call `report_failure`.
-- Reason step-by-step before every tool call.
-- Respond in the same language as the user's goal.";
+const SYSTEM_PROMPT: &str = include_str!("../../prompts/system/tools_agent.md");
 
 pub struct AgentEngine {
     state: AgentState,
@@ -161,6 +153,20 @@ impl AgentEngine {
 
                     match provider.chat(messages, tools, &cfg, &self.app).await {
                         Ok(response) => {
+                            // Dev-only: log planner LLM thinking + reply + tool calls for debugging
+                            if cfg!(debug_assertions) {
+                                tracing::debug!(
+                                    reasoning = %response.reasoning,
+                                    content = %response.content,
+                                    tools = ?response
+                                        .tool_calls
+                                        .iter()
+                                        .map(|tc| (&tc.id, &tc.function.name, &tc.function.arguments))
+                                        .collect::<Vec<_>>(),
+                                    "planner LLM response (dev)"
+                                );
+                            }
+
                             if let Some(tc) = response.tool_calls.into_iter().next() {
                                 // Append the assistant's response (with tool call) to history
                                 self.conv_messages.push(ChatMessage {
@@ -308,12 +314,14 @@ impl AgentEngine {
 
                         // ② Separate user turn carrying the actual image.
                         //    GLM-4.6V base64 format: raw base64 string (no data URI prefix).
+                        // For GLM-compatible vision APIs, wrap raw base64 as a data URI.
+                        let data_url = format!("data:image/jpeg;base64,{}", grid_b64);
                         self.conv_messages.push(ChatMessage {
                             role: "user".into(),
                             content: MessageContent::Parts(vec![
                                 ContentPart::ImageUrl {
                                     image_url: ImageUrl {
-                                        url: grid_b64.clone(),
+                                        url: data_url,
                                     },
                                 },
                                 ContentPart::Text {
@@ -465,6 +473,69 @@ impl AgentEngine {
                 };
                 self.push_history(&action, &result);
                 self.state = AgentState::Evaluating { last_result: result };
+            }
+
+            // ── ExecuteTerminal: run PowerShell command and feed output back to LLM ──
+            AgentAction::ExecuteTerminal { ref command, ref reason } => {
+                tracing::info!(%command, %reason, "executing terminal command");
+
+                let output = Command::new("powershell")
+                    .arg("-NoProfile")
+                    .arg("-Command")
+                    .arg(command)
+                    .output()
+                    .await;
+
+                let (ok, raw_out) = match output {
+                    Ok(out) => {
+                        let mut buf = String::new();
+                        if !out.stdout.is_empty() {
+                            buf.push_str(&String::from_utf8_lossy(&out.stdout));
+                        }
+                        if !out.stderr.is_empty() {
+                            if !buf.is_empty() {
+                                buf.push_str("\n--- STDERR ---\n");
+                            }
+                            buf.push_str(&String::from_utf8_lossy(&out.stderr));
+                        }
+                        (out.status.success(), buf)
+                    }
+                    Err(e) => (false, format!("failed to spawn PowerShell: {e}")),
+                };
+
+                // Truncate very long output to keep prompts manageable.
+                let truncated = if raw_out.len() > 4000 {
+                    format!("{}\n\n[truncated, total {} chars]", &raw_out[..4000], raw_out.len())
+                } else {
+                    raw_out
+                };
+
+                let msg = if ok {
+                    format!("PowerShell command executed successfully.\ncommand: {command}\noutput:\n{truncated}")
+                } else {
+                    format!("PowerShell command failed.\ncommand: {command}\noutput:\n{truncated}")
+                };
+
+                // Feed tool result back to LLM as a tool message tied to the pending tool_call_id.
+                self.conv_messages.push(ChatMessage {
+                    role: "tool".into(),
+                    content: MessageContent::Text(msg.clone()),
+                    tool_call_id: Some(self.pending_tool_id.clone()),
+                    tool_calls: None,
+                });
+
+                let result = ActionResult {
+                    action: action.clone(),
+                    success: ok,
+                    error: if ok { None } else { Some("PowerShell command failed".into()) },
+                    timestamp: chrono::Utc::now(),
+                };
+                self.push_history(&action, &result);
+
+                // Loop back to Planning so the LLM can read the terminal output and produce a final answer.
+                self.state = AgentState::Planning {
+                    goal: self.current_goal.clone(),
+                };
             }
 
             // ── FinishTask ────────────────────────────────────────────────

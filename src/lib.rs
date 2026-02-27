@@ -26,8 +26,12 @@ pub struct AgentHandle {
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("debug")),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                // Default dev filter: 只对 seeclaw_lib 开 debug，其它库降噪
+                tracing_subscriber::EnvFilter::new(
+                    "seeclaw_lib=debug,tauri=info,reqwest=warn,hyper=warn",
+                )
+            }),
         )
         .init();
 

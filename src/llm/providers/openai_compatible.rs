@@ -62,8 +62,32 @@ impl LlmProvider for OpenAiCompatibleProvider {
             "sending LLM request"
         );
         tracing::debug!(
-            body = %serde_json::to_string(&body).unwrap_or_default(),
-            "request body"
+            body = %{
+                // Clone body and sanitize only for logging so the actual request
+                // still contains the real image payloads.
+                let mut log_body = body.clone();
+                // Sanitize large payloads (e.g. base64 images) before logging.
+                if let Some(msgs) = log_body.get_mut("messages").and_then(|m| m.as_array_mut()) {
+                    for msg in msgs {
+                        if let Some(content) = msg.get_mut("content") {
+                            // content can be string or array of parts; we only touch the array case.
+                            if let Some(parts) = content.as_array_mut() {
+                                for part in parts {
+                                    if part.get("type").and_then(|t| t.as_str()) == Some("image_url") {
+                                        if let Some(image_url) = part.get_mut("image_url") {
+                                            if let Some(url) = image_url.get_mut("url") {
+                                                *url = serde_json::Value::String("<omitted_base64_image>".to_string());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                serde_json::to_string(&log_body).unwrap_or_default()
+            },
+            "request body (sanitized, base64 omitted)"
         );
 
         let response = self

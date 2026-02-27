@@ -119,8 +119,16 @@ impl ProviderRegistry {
             llm_config: config.llm.clone(),
         };
         for (id, entry) in &config.llm.providers {
-            let api_key = std::env::var(format!("SEECLAW_{}_API_KEY", id.to_uppercase()))
-                .unwrap_or_else(|_| entry.api_key.clone().unwrap_or_default());
+            // UI config key takes highest priority; fall back to env var only when unset
+            let api_key = entry
+                .api_key
+                .as_deref()
+                .filter(|k| !k.is_empty())
+                .map(|k| k.to_string())
+                .unwrap_or_else(|| {
+                    std::env::var(format!("SEECLAW_{}_API_KEY", id.to_uppercase()))
+                        .unwrap_or_default()
+                });
             let provider = OpenAiCompatibleProvider::new(
                 id.clone(),
                 entry.api_base.clone(),

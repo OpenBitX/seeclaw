@@ -21,7 +21,10 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "element_id": { "type": "string" }
+          "element_id": {
+            "type": "string",
+            "description": "Element ID as shown in the annotated screenshot."
+          }
         },
         "required": ["element_id"]
       }
@@ -35,7 +38,10 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "element_id": { "type": "string" }
+          "element_id": {
+            "type": "string",
+            "description": "Element ID as shown in the annotated screenshot."
+          }
         },
         "required": ["element_id"]
       }
@@ -49,9 +55,20 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "direction": { "type": "string", "enum": ["up", "down", "left", "right"] },
-          "distance": { "type": "string", "enum": ["short", "long"], "description": "short=3 lines, long=1 page" },
-          "element_id": { "type": "string", "description": "Optional: scroll within a specific element." }
+          "direction": {
+            "type": "string",
+            "enum": ["up", "down", "left", "right"],
+            "description": "Scroll direction. up/down for vertical scroll, left/right for horizontal scroll."
+          },
+          "distance": {
+            "type": "string",
+            "enum": ["short", "long"],
+            "description": "Scroll distance. short = about 3 lines, long = about one page."
+          },
+          "element_id": {
+            "type": "string",
+            "description": "Optional: scroll within a specific element instead of the whole viewport."
+          }
         },
         "required": ["direction", "distance"]
       }
@@ -65,7 +82,10 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "text": { "type": "string" },
+          "text": {
+            "type": "string",
+            "description": "Plain text to type into the focused input."
+          },
           "clear_first": { "type": "boolean", "description": "If true, select-all and delete before typing." }
         },
         "required": ["text"]
@@ -94,7 +114,10 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "key": { "type": "string" }
+          "key": {
+            "type": "string",
+            "description": "Single key name, e.g. Enter, Escape, Tab, ArrowUp, ArrowDown, Delete, Backspace."
+          }
         },
         "required": ["key"]
       }
@@ -121,7 +144,10 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "command": { "type": "string" },
+          "command": {
+            "type": "string",
+            "description": "PowerShell command to execute."
+          },
           "reason": { "type": "string", "description": "Explain why terminal execution is necessary." }
         },
         "required": ["command", "reason"]
@@ -167,7 +193,12 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "milliseconds": { "type": "integer", "minimum": 100, "maximum": 10000 }
+          "milliseconds": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 10000,
+            "description": "Delay duration in milliseconds. Prefer shorter waits and re-checking state instead of long sleeps."
+          }
         },
         "required": ["milliseconds"]
       }
@@ -195,8 +226,14 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "reason": { "type": "string" },
-          "last_attempted_action": { "type": "string" }
+          "reason": {
+            "type": "string",
+            "description": "Human-readable explanation why the task cannot be completed."
+          },
+          "last_attempted_action": {
+            "type": "string",
+            "description": "Optional: brief description of the last action that failed before giving up."
+          }
         },
         "required": ["reason"]
       }

@@ -48,18 +48,19 @@ fn capture_sync() -> SeeClawResult<ScreenshotResult> {
     let rgba_img = image::RgbaImage::from_raw(phys_w, phys_h, raw)
         .ok_or_else(|| SeeClawError::Perception("image::from_raw failed".into()))?;
 
-    let mut png_bytes = Vec::new();
+    // Encode as moderately compressed JPEG to keep size within LLM limits.
+    let mut jpeg_bytes = Vec::new();
     image::DynamicImage::ImageRgba8(rgba_img)
         .write_to(
-            &mut std::io::Cursor::new(&mut png_bytes),
-            image::ImageFormat::Png,
+            &mut std::io::Cursor::new(&mut jpeg_bytes),
+            image::ImageFormat::Jpeg,
         )
-        .map_err(|e| SeeClawError::Perception(format!("PNG encode: {e}")))?;
+        .map_err(|e| SeeClawError::Perception(format!("JPEG encode: {e}")))?;
 
-    let image_base64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+    let image_base64 = base64::engine::general_purpose::STANDARD.encode(&jpeg_bytes);
 
     Ok(ScreenshotResult {
-        image_bytes: png_bytes,
+        image_bytes: jpeg_bytes,
         image_base64,
         meta,
     })

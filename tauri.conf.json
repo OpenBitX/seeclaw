@@ -22,10 +22,12 @@
         "title": "SeeClaw",
         "width": 1000,
         "height": 720,
-        "minWidth": 800,
-        "minHeight": 600,
+        "minWidth": 400,
+        "minHeight": 500,
         "resizable": true,
-        "center": true
+        "center": true,
+        "decorations": false,
+        "transparent": true
       }
     ]
   },

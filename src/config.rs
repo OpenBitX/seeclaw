@@ -5,10 +5,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::errors::{SeeClawError, SeeClawResult};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
     pub llm: LlmConfig,
+    #[serde(default)]
     pub safety: SafetyConfig,
+    #[serde(default)]
     pub prompts: PromptsConfig,
     #[serde(default)]
     pub mcp: McpConfig,
@@ -82,14 +84,29 @@ pub struct SafetyConfig {
     pub max_loop_duration_minutes: u32,
 }
 
+impl Default for SafetyConfig {
+    fn default() -> Self {
+        Self {
+            allow_terminal_commands: false,
+            allow_file_operations: false,
+            require_approval_for: vec!["execute_terminal".into(), "mcp_call".into()],
+            max_consecutive_failures: default_max_failures(),
+            max_loop_duration_minutes: 0,
+        }
+    }
+}
+
 fn default_max_failures() -> u32 {
     5
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PromptsConfig {
+    #[serde(default)]
     pub tools_file: String,
+    #[serde(default)]
     pub system_template: String,
+    #[serde(default)]
     pub experience_summary_template: String,
 }
 
@@ -113,7 +130,8 @@ fn default_true() -> bool {
     true
 }
 
-fn resolve_config_path() -> SeeClawResult<PathBuf> {
+/// Returns the path to an *existing* config.toml for reading.
+fn find_config_path() -> SeeClawResult<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             let candidate = parent.join("config.toml");
@@ -123,21 +141,32 @@ fn resolve_config_path() -> SeeClawResult<PathBuf> {
             }
         }
     }
-
     let cwd = std::env::current_dir()?;
     let candidate = cwd.join("config.toml");
     if candidate.exists() {
         tracing::debug!(path = %candidate.display(), "config found in working directory");
         return Ok(candidate);
     }
-
     Err(SeeClawError::Config(
         "config.toml not found next to executable or in working directory".into(),
     ))
 }
 
+/// Returns the canonical path where config should be **written**.
+/// Prefers the exe-adjacent path (works for production bundles).
+/// Falls back to cwd (works for `cargo tauri dev`).
+/// Does NOT require the file to already exist.
+fn write_config_path() -> SeeClawResult<PathBuf> {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            return Ok(parent.join("config.toml"));
+        }
+    }
+    Ok(std::env::current_dir()?.join("config.toml"))
+}
+
 pub fn load_config() -> SeeClawResult<AppConfig> {
-    let path = resolve_config_path()?;
+    let path = find_config_path()?;
     let content = std::fs::read_to_string(&path)?;
     let config: AppConfig = toml::from_str(&content)?;
     tracing::info!(path = %path.display(), provider = %config.llm.active_provider, "config loaded");
@@ -145,7 +174,8 @@ pub fn load_config() -> SeeClawResult<AppConfig> {
 }
 
 pub fn save_config(config: &AppConfig) -> SeeClawResult<()> {
-    let path = resolve_config_path()?;
+    // Use write_config_path so saving works even on first run (no existing file required).
+    let path = write_config_path()?;
     let content = toml::to_string_pretty(config)?;
     std::fs::write(&path, content)?;
     tracing::info!(path = %path.display(), "config saved");

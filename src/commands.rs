@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 
 use crate::agent_engine::state::AgentEvent;
@@ -103,9 +103,10 @@ pub async fn start_chat(
 
 /// Return the current AppConfig as JSON for the settings UI.
 /// API keys are redacted (replaced with "***") before sending to the frontend.
+/// Falls back to a default config if config.toml is missing (first-run scenario).
 #[tauri::command]
 pub async fn get_config() -> Result<serde_json::Value, String> {
-    let mut cfg = load_config().map_err(|e| e.to_string())?;
+    let mut cfg = load_config().unwrap_or_default();
     // Redact api_key values for security
     for entry in cfg.llm.providers.values_mut() {
         if entry.api_key.as_deref().map(|k| !k.is_empty()).unwrap_or(false) {
@@ -117,15 +118,22 @@ pub async fn get_config() -> Result<serde_json::Value, String> {
 
 /// Save settings from the UI back to config.toml.
 /// If api_key is "***" (redacted sentinel), preserve the existing key.
+/// After saving, rebuilds the in-memory ProviderRegistry and emits
+/// a "config_updated" event to the frontend for MobX sync.
 #[tauri::command]
-pub async fn save_config_ui(payload: serde_json::Value) -> Result<(), String> {
+pub async fn save_config_ui(
+    app: AppHandle,
+    registry_state: State<'_, Arc<Mutex<ProviderRegistry>>>,
+    payload: serde_json::Value,
+) -> Result<(), String> {
     let new_cfg: AppConfig = serde_json::from_value(payload).map_err(|e| e.to_string())?;
-    // Load existing config to preserve redacted API keys
+    // Load existing config to preserve redacted API keys and prompts
     let mut existing = load_config().unwrap_or_else(|_| new_cfg.clone());
     // Merge: copy all fields from new_cfg, but skip api_key="***"
     existing.llm.active_provider = new_cfg.llm.active_provider.clone();
     existing.llm.roles = new_cfg.llm.roles.clone();
     existing.safety = new_cfg.safety.clone();
+    existing.mcp = new_cfg.mcp.clone();
     for (id, new_entry) in &new_cfg.llm.providers {
         if let Some(existing_entry) = existing.llm.providers.get_mut(id) {
             existing_entry.display_name = new_entry.display_name.clone();
@@ -140,5 +148,19 @@ pub async fn save_config_ui(payload: serde_json::Value) -> Result<(), String> {
             existing.llm.providers.insert(id.clone(), new_entry.clone());
         }
     }
-    save_config(&existing).map_err(|e| e.to_string())
+    save_config(&existing).map_err(|e| e.to_string())?;
+
+    // Rebuild in-memory registry so changes take effect immediately
+    let new_registry = ProviderRegistry::from_config(&existing);
+    *registry_state.lock().await = new_registry;
+
+    // Notify the frontend so MobX store can sync
+    if let Err(e) = app.emit(
+        "config_updated",
+        serde_json::to_value(&existing).unwrap_or_default(),
+    ) {
+        tracing::warn!("Failed to emit config_updated event: {e}");
+    }
+
+    Ok(())
 }
