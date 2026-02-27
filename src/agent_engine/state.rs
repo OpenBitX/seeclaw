@@ -9,7 +9,7 @@ pub enum AgentState {
     Executing { action: AgentAction },
     WaitingForUser { pending_action: AgentAction },
     Evaluating { last_result: ActionResult },
-    Error(String),
+    Error { message: String },
     Done { summary: String },
 }
 
@@ -53,4 +53,13 @@ pub enum LoopMode {
     UntilDone,
     Timed,
     FailureLimit,
+}
+
+/// Events that drive state transitions in the AgentEngine run loop.
+#[derive(Debug)]
+pub enum AgentEvent {
+    GoalReceived(String),
+    Stop,
+    UserApproved,
+    UserRejected,
 }
