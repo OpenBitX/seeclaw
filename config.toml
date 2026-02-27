@@ -1,0 +1,56 @@
+[llm]
+active_provider = "zhipu"
+
+[llm.providers.zhipu]
+display_name = "智谱 GLM"
+api_base = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+model = "glm-4v-plus"
+temperature = 0.1
+
+[llm.providers.openai]
+display_name = "OpenAI"
+api_base = "https://api.openai.com/v1/chat/completions"
+model = "gpt-4o"
+temperature = 0.2
+
+[llm.providers.claude]
+display_name = "Anthropic Claude"
+api_base = "https://api.anthropic.com/v1/messages"
+model = "claude-opus-4-5"
+temperature = 0.2
+
+[llm.providers.deepseek]
+display_name = "DeepSeek"
+api_base = "https://api.deepseek.com/v1/chat/completions"
+model = "deepseek-chat"
+temperature = 0.1
+
+[llm.providers.qwen]
+display_name = "阿里云 Qwen"
+api_base = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+model = "qwen-vl-max"
+temperature = 0.1
+
+[llm.providers.openrouter]
+display_name = "OpenRouter"
+api_base = "https://openrouter.ai/api/v1/chat/completions"
+model = "anthropic/claude-3.5-sonnet"
+temperature = 0.2
+
+[safety]
+allow_terminal_commands = false
+allow_file_operations = false
+require_approval_for = ["execute_terminal", "file_delete", "install_package", "mcp_call"]
+max_consecutive_failures = 5
+max_loop_duration_minutes = 0
+
+[prompts]
+tools_file = "prompts/tools/builtin.json"
+system_template = "prompts/system/agent_system.md"
+experience_summary_template = "prompts/system/experience_summary.md"
+
+[[mcp.servers]]
+name = "filesystem"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "./workspace"]
+enabled = false

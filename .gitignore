@@ -1,0 +1,32 @@
+# Environment secrets
+.env
+
+# Rust build artifacts
+target/
+
+# Node modules
+node_modules/
+
+# Frontend build output
+dist/
+src-ui/dist/
+
+# ONNX model files (large binary, download separately)
+*.onnx
+*.ort
+
+# Agent runtime files
+experience.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tauri
+src-tauri/target/

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SeeClaw",
+  "version": "0.1.0",
+  "identifier": "com.seeclaw.app",
+  "build": {
+    "frontendDist": "src-ui/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "cd src-ui && yarn dev",
+    "beforeBuildCommand": "cd src-ui && yarn build"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "title": "SeeClaw",
+        "width": 1000,
+        "height": 720,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "center": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": []
+  }
+}
