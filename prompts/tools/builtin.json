@@ -1,0 +1,206 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "mouse_click",
+      "description": "Single left-click on a UI element by its ID from the perception context.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "element_id": { "type": "string", "description": "Element ID as shown in the annotated screenshot." }
+        },
+        "required": ["element_id"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "mouse_double_click",
+      "description": "Double-click on a UI element by its ID.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "element_id": { "type": "string" }
+        },
+        "required": ["element_id"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "mouse_right_click",
+      "description": "Right-click on a UI element to open context menu.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "element_id": { "type": "string" }
+        },
+        "required": ["element_id"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "scroll",
+      "description": "Scroll the viewport. Use 'short' for one step (3 lines), 'long' for one page.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "direction": { "type": "string", "enum": ["up", "down", "left", "right"] },
+          "distance": { "type": "string", "enum": ["short", "long"], "description": "short=3 lines, long=1 page" },
+          "element_id": { "type": "string", "description": "Optional: scroll within a specific element." }
+        },
+        "required": ["direction", "distance"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "type_text",
+      "description": "Type text into the currently focused input field. Supports both Chinese and English.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string" },
+          "clear_first": { "type": "boolean", "description": "If true, select-all and delete before typing." }
+        },
+        "required": ["text"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "hotkey",
+      "description": "Press a keyboard shortcut combination. Examples: ctrl+c, ctrl+v, alt+f4, ctrl+shift+t, win+d.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "keys": { "type": "string", "description": "Key combo as plus-separated string, e.g. 'ctrl+shift+esc'." }
+        },
+        "required": ["keys"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "key_press",
+      "description": "Press a single key. Use for navigation keys: Enter, Escape, Tab, ArrowUp, ArrowDown, Delete, Backspace, etc.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "key": { "type": "string" }
+        },
+        "required": ["key"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_viewport",
+      "description": "Capture a fresh screenshot of the current screen state and return an annotated image with element IDs. Use this before any click to verify the current UI state.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "annotate": { "type": "boolean", "description": "If true, draw bounding boxes and IDs on the screenshot." }
+        },
+        "required": []
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "execute_terminal",
+      "description": "Execute a PowerShell command. REQUIRES human approval before execution. Use only when GUI interaction is insufficient.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "string" },
+          "reason": { "type": "string", "description": "Explain why terminal execution is necessary." }
+        },
+        "required": ["command", "reason"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "mcp_call",
+      "description": "Call a tool provided by a connected MCP server. List available MCP tools with get_viewport first.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "server_name": { "type": "string", "description": "MCP server name as defined in config.toml." },
+          "tool_name": { "type": "string" },
+          "arguments": { "type": "object" }
+        },
+        "required": ["server_name", "tool_name", "arguments"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "invoke_skill",
+      "description": "Execute a pre-defined user skill (e.g. create-excel-pivot, fill-word-template). Skills are composite actions that automate complex repetitive tasks.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "skill_name": { "type": "string", "description": "Skill name as registered in the skills/ directory." },
+          "inputs": { "type": "object", "description": "Named input variables the skill requires." }
+        },
+        "required": ["skill_name", "inputs"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "wait",
+      "description": "Wait for a specified duration before the next action. Use after triggering an operation that needs time to complete (e.g. file save, app launch).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "milliseconds": { "type": "integer", "minimum": 100, "maximum": 10000 }
+        },
+        "required": ["milliseconds"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "finish_task",
+      "description": "Signal that the assigned task has been completed successfully.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "summary": { "type": "string", "description": "Brief summary of what was accomplished." }
+        },
+        "required": ["summary"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "report_failure",
+      "description": "Signal that the task cannot be completed and explain why.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "reason": { "type": "string" },
+          "last_attempted_action": { "type": "string" }
+        },
+        "required": ["reason"]
+      }
+    }
+  }
+]

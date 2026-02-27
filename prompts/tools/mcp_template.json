@@ -1,0 +1,8 @@
+{
+  "type": "function",
+  "function": {
+    "name": "mcp__{server_name}__{tool_name}",
+    "description": "[MCP:{server_name}] {tool_description}",
+    "parameters": "{tool_input_schema}"
+  }
+}
