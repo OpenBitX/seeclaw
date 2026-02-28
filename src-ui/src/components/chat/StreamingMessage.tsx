@@ -5,6 +5,7 @@ import Typography from '@mui/joy/Typography';
 import IconButton from '@mui/joy/IconButton';
 import type { Message } from '../../types/agent';
 import { ActionCard } from '../shared/ActionCard';
+import { ThinkingIndicator } from './ThinkingIndicator';
 
 interface Props {
   message: Message;
@@ -13,9 +14,15 @@ interface Props {
 export function StreamingMessage({ message }: Props) {
   const [reasoningExpanded, setReasoningExpanded] = useState(false);
   const hasReasoning = (message.reasoningContent ?? '').length > 0;
+  const hasContent = message.content.length > 0;
+  /** Message just opened, waiting for first token — show animated indicator */
+  const showThinking = message.isStreaming && !hasContent && !hasReasoning;
 
   return (
     <Box sx={{ mb: 2 }}>
+      {/* Animated thinking indicator — visible before first token arrives */}
+      {showThinking && <ThinkingIndicator />}
+
       {hasReasoning && (
         <Box sx={{ mb: 1 }}>
           <Box

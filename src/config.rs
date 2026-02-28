@@ -14,7 +14,67 @@ pub struct AppConfig {
     pub prompts: PromptsConfig,
     #[serde(default)]
     pub mcp: McpConfig,
+    #[serde(default)]
+    pub perception: PerceptionConfig,
 }
+
+/// Visual perception / screenshot settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerceptionConfig {
+    /// Number of rows and columns in the SoM grid overlay.
+    /// Range: 4–26.  Default: 12.
+    #[serde(default = "default_grid_n")]
+    pub grid_n: u32,
+
+    /// Path to the YOLOv8 ONNX model file.
+    /// Relative paths are resolved from the working directory.
+    #[serde(default = "default_yolo_model_path")]
+    pub yolo_model_path: String,
+
+    /// YOLO confidence threshold (0.0–1.0).
+    #[serde(default = "default_conf_threshold")]
+    pub confidence_threshold: f32,
+
+    /// NMS IoU threshold (0.0–1.0).
+    #[serde(default = "default_iou_threshold")]
+    pub iou_threshold: f32,
+
+    /// Enable YOLO-based detection (falls back to SoM grid if model not found).
+    #[serde(default = "default_true")]
+    pub use_yolo: bool,
+
+    /// Enable Windows UI Automation accessibility tree collection.
+    #[serde(default = "default_true")]
+    pub enable_ui_automation: bool,
+
+    /// Enable focus-crop second pass for improved precision (adds latency).
+    #[serde(default)]
+    pub enable_focus_crop: bool,
+
+    /// Custom YOLO class names. If empty, uses default UI class list.
+    #[serde(default)]
+    pub class_names: Vec<String>,
+}
+
+impl Default for PerceptionConfig {
+    fn default() -> Self {
+        Self {
+            grid_n: default_grid_n(),
+            yolo_model_path: default_yolo_model_path(),
+            confidence_threshold: default_conf_threshold(),
+            iou_threshold: default_iou_threshold(),
+            use_yolo: true,
+            enable_ui_automation: true,
+            enable_focus_crop: false,
+            class_names: Vec::new(),
+        }
+    }
+}
+
+fn default_grid_n() -> u32 { 12 }
+fn default_yolo_model_path() -> String { "models/gpa_gui_detector.onnx".to_string() }
+fn default_conf_threshold() -> f32 { 0.05 }
+fn default_iou_threshold() -> f32 { 0.5 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LlmConfig {

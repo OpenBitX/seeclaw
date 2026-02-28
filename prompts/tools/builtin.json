@@ -126,19 +126,6 @@
   {
     "type": "function",
     "function": {
-      "name": "get_viewport",
-      "description": "Capture a fresh screenshot of the current screen state and return an annotated image with element IDs. Use this before any click to verify the current UI state.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "annotate": { "type": "boolean", "description": "If true, draw bounding boxes and IDs on the screenshot." }
-        }
-      }
-    }
-  },
-  {
-    "type": "function",
-    "function": {
       "name": "execute_terminal",
       "description": "Execute a PowerShell command. REQUIRES human approval before execution. Use only when GUI interaction is insufficient.",
       "parameters": {
@@ -236,6 +223,84 @@
           }
         },
         "required": ["reason"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "plan_task",
+      "description": "MUST be called first. Produce a step-by-step todo list to accomplish the goal. Each step is one atomic action. For steps that require clicking a UI element, set needs_viewport=true and describe the target in 'target' — the vision model will locate it for you.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "steps": {
+            "type": "array",
+            "description": "Ordered list of steps to execute.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action_type": {
+                  "type": "string",
+                  "description": "Action to perform. Use one of: mouse_click, mouse_double_click, mouse_right_click, type_text, hotkey, key_press, execute_terminal, wait, scroll."
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Human-readable description of what this step does."
+                },
+                "needs_viewport": {
+                  "type": "boolean",
+                  "description": "Set true if this step requires locating a UI element on screen. The vision model will find the grid cell — do NOT guess element_id."
+                },
+                "target": {
+                  "type": "string",
+                  "description": "Description of the UI element to locate. Required when needs_viewport=true."
+                },
+                "text": {
+                  "type": "string",
+                  "description": "For type_text steps: the text to type."
+                },
+                "keys": {
+                  "type": "string",
+                  "description": "For hotkey steps: key combo, e.g. ctrl+c."
+                },
+                "key": {
+                  "type": "string",
+                  "description": "For key_press steps: single key name, e.g. Enter."
+                },
+                "command": {
+                  "type": "string",
+                  "description": "For execute_terminal steps: the PowerShell command."
+                },
+                "milliseconds": {
+                  "type": "integer",
+                  "description": "For wait steps: duration in ms (100–10000)."
+                },
+                "direction": {
+                  "type": "string",
+                  "description": "For scroll steps: up, down, left, or right."
+                }
+              },
+              "required": ["action_type", "description", "needs_viewport"]
+            }
+          }
+        },
+        "required": ["steps"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "evaluate_completion",
+      "description": "Call this after all steps are done to self-evaluate whether the goal was fully achieved.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "completed": { "type": "boolean", "description": "True if the goal was fully achieved." },
+          "summary": { "type": "string", "description": "Brief summary of what was accomplished or why it failed." }
+        },
+        "required": ["completed", "summary"]
       }
     }
   }

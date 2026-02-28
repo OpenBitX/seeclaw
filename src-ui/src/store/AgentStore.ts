@@ -17,6 +17,8 @@ class AgentStore {
   elapsedMs = 0;
   loopConfig: LoopConfig = { mode: 'until_done' };
   pendingApproval: ApprovalRequest | null = null;
+  /** Fine-grained activity label emitted by the engine (e.g. "正在截取屏幕…"). */
+  latestActivity: string | null = null;
 
   private currentStreamingId: string | null = null;
   private streamStartedAt: number | null = null;
@@ -98,6 +100,8 @@ class AgentStore {
 
   setState(state: AgentStateKind): void {
     this.state = state;
+    // Clear fine-grained activity on state transitions
+    this.latestActivity = null;
     if (state === 'idle' || state === 'done' || state === 'error') {
       if (this.currentStreamingId) {
         const msg = this.messages.find((m) => m.id === this.currentStreamingId);
@@ -105,6 +109,11 @@ class AgentStore {
         this.currentStreamingId = null;
       }
     }
+  }
+
+  /** Called by `agent_activity` Tauri events to show fine-grained progress labels. */
+  setActivity(text: string): void {
+    this.latestActivity = text;
   }
 
   setLoopStats(failureCount: number, loopCount: number, elapsedMs: number): void {
@@ -156,6 +165,7 @@ class AgentStore {
     this.loopCount = 0;
     this.elapsedMs = 0;
     this.pendingApproval = null;
+    this.latestActivity = null;
     this.currentStreamingId = null;
     this.streamStartedAt = null;
   }

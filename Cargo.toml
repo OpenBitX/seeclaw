@@ -35,6 +35,16 @@ dirs = "5"
 xcap = "0.0"
 image = "0.25"
 enigo = "0.2"
+regex = "1"
+ort = { version = "2.0.0-rc.11", features = ["download-binaries", "ndarray"] }
+ndarray = "0.17"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_UI_Accessibility",
+    "Win32_System_Com",
+    "Win32_Foundation",
+] }
 
 [profile.release]
 opt-level = 3

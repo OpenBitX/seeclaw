@@ -97,4 +97,8 @@ pub struct CallConfig {
     /// Whether to use SSE streaming; non-streaming returns a single JSON response.
     pub stream: bool,
     pub temperature: f64,
+    /// When true, do NOT emit `llm_stream_chunk` events to the frontend.
+    /// Use for internal calls (e.g. VLM element-location queries) that should
+    /// be invisible to the user.
+    pub silent: bool,
 }

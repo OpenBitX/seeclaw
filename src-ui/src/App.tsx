@@ -88,7 +88,11 @@ const AppInner = observer(() => {
 
   const handleStateChange = useCallback((payload: AgentStatePayload) => {
     agentStore.setState(payload.state);
-    if (payload.state === 'planning') agentStore.startAssistantMessage();
+    // Pre-open an assistant message bubble for states that will stream LLM content,
+    // so the "thinking" indicator appears immediately without waiting for the first chunk.
+    if (payload.state === 'planning' || payload.state === 'evaluating') {
+      agentStore.startAssistantMessage();
+    }
   }, []);
   useTauriEvent<AgentStatePayload>('agent_state_changed', handleStateChange);
 
@@ -105,6 +109,12 @@ const AppInner = observer(() => {
     agentStore.handleViewportCaptured(payload);
   }, []);
   useTauriEvent<ViewportCapturedPayload>('viewport_captured', handleViewportCaptured);
+
+  /** Fine-grained activity labels emitted during execution/observation phases */
+  const handleActivity = useCallback((payload: { text: string }) => {
+    agentStore.setActivity(payload.text);
+  }, []);
+  useTauriEvent<{ text: string }>('agent_activity', handleActivity);
 
   // Sync MobX immediately when Rust broadcasts config_updated after save
   const handleConfigUpdated = useCallback((raw: Record<string, unknown>) => {

@@ -61,16 +61,31 @@ impl LlmProvider for OpenAiCompatibleProvider {
             stream = cfg.stream,
             "sending LLM request"
         );
-        tracing::debug!(
-            body = %{
-                // Clone body and sanitize only for logging so the actual request
-                // still contains the real image payloads.
+        // Log a concise summary at DEBUG; move full body to TRACE.
+        {
+            let msg_count = body["messages"].as_array().map(|a| a.len()).unwrap_or(0);
+            let tool_count = body["tools"].as_array().map(|a| a.len()).unwrap_or(0);
+            let tool_names: Vec<&str> = body["tools"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|t| t["function"]["name"].as_str())
+                        .collect()
+                })
+                .unwrap_or_default();
+            tracing::debug!(
+                messages = msg_count,
+                tools = tool_count,
+                tool_names = ?tool_names,
+                "LLM request prepared"
+            );
+
+            // Full body at TRACE level for deep debugging only
+            if tracing::enabled!(tracing::Level::TRACE) {
                 let mut log_body = body.clone();
-                // Sanitize large payloads (e.g. base64 images) before logging.
                 if let Some(msgs) = log_body.get_mut("messages").and_then(|m| m.as_array_mut()) {
                     for msg in msgs {
                         if let Some(content) = msg.get_mut("content") {
-                            // content can be string or array of parts; we only touch the array case.
                             if let Some(parts) = content.as_array_mut() {
                                 for part in parts {
                                     if part.get("type").and_then(|t| t.as_str()) == Some("image_url") {
@@ -85,10 +100,12 @@ impl LlmProvider for OpenAiCompatibleProvider {
                         }
                     }
                 }
-                serde_json::to_string(&log_body).unwrap_or_default()
-            },
-            "request body (sanitized, base64 omitted)"
-        );
+                tracing::trace!(
+                    body = %serde_json::to_string(&log_body).unwrap_or_default(),
+                    "full request body (base64 omitted)"
+                );
+            }
+        }
 
         let response = self
             .client
@@ -105,20 +122,21 @@ impl LlmProvider for OpenAiCompatibleProvider {
         }
 
         if cfg.stream {
-            self.handle_stream(response, app).await
+            self.handle_stream(response, app, cfg.silent).await
         } else {
-            self.handle_json(response, app).await
+            self.handle_json(response, app, cfg.silent).await
         }
     }
 }
 
 impl OpenAiCompatibleProvider {
     /// Handle SSE streaming response.
-    /// Streams chunks to the frontend and accumulates the full response to return.
+    /// Streams chunks to the frontend (unless `silent`) and accumulates the full response.
     async fn handle_stream(
         &self,
         response: reqwest::Response,
         app: &AppHandle,
+        silent: bool,
     ) -> SeeClawResult<LlmResponse> {
         let mut byte_stream = response.bytes_stream();
         let mut line_buf = String::new();
@@ -160,7 +178,9 @@ impl OpenAiCompatibleProvider {
                                 _ => {}
                             }
 
-                            let _ = app.emit("llm_stream_chunk", &chunk);
+                            if !silent {
+                                let _ = app.emit("llm_stream_chunk", &chunk);
+                            }
 
                             if is_done {
                                 done_emitted = true;
@@ -179,7 +199,7 @@ impl OpenAiCompatibleProvider {
         }
 
         // Fallback Done in case stream ended without [DONE] marker
-        if !done_emitted {
+        if !done_emitted && !silent {
             let _ = app.emit(
                 "llm_stream_chunk",
                 &StreamChunk {
@@ -211,6 +231,7 @@ impl OpenAiCompatibleProvider {
         &self,
         response: reqwest::Response,
         app: &AppHandle,
+        silent: bool,
     ) -> SeeClawResult<LlmResponse> {
         let json: serde_json::Value = response.json().await?;
 
@@ -244,33 +265,35 @@ impl OpenAiCompatibleProvider {
             "LLM JSON response received"
         );
 
-        if !content.is_empty() {
-            let _ = app.emit(
-                "llm_stream_chunk",
-                &StreamChunk {
-                    kind: StreamChunkKind::Content,
-                    content: content.clone(),
-                },
-            );
-        }
-        if !tool_calls.is_empty() {
-            if let Ok(tc_json) = serde_json::to_string(&tool_calls) {
+        if !silent {
+            if !content.is_empty() {
                 let _ = app.emit(
                     "llm_stream_chunk",
                     &StreamChunk {
-                        kind: StreamChunkKind::ToolCall,
-                        content: tc_json,
+                        kind: StreamChunkKind::Content,
+                        content: content.clone(),
                     },
                 );
             }
+            if !tool_calls.is_empty() {
+                if let Ok(tc_json) = serde_json::to_string(&tool_calls) {
+                    let _ = app.emit(
+                        "llm_stream_chunk",
+                        &StreamChunk {
+                            kind: StreamChunkKind::ToolCall,
+                            content: tc_json,
+                        },
+                    );
+                }
+            }
+            let _ = app.emit(
+                "llm_stream_chunk",
+                &StreamChunk {
+                    kind: StreamChunkKind::Done,
+                    content: String::new(),
+                },
+            );
         }
-        let _ = app.emit(
-            "llm_stream_chunk",
-            &StreamChunk {
-                kind: StreamChunkKind::Done,
-                content: String::new(),
-            },
-        );
 
         Ok(LlmResponse {
             content,

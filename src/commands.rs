@@ -48,15 +48,13 @@ pub async fn stop_task(
     _app: AppHandle,
     handle: State<'_, Arc<AgentHandle>>,
 ) -> Result<(), String> {
-    tracing::info!("stop_task: sending Stop to AgentEngine");
+    tracing::info!("stop_task: signalling stop via atomic flag + channel");
+    // Set the atomic flag FIRST — immediately visible to the engine even mid-operation
     handle
-        .tx
-        .send(AgentEvent::Stop)
-        .await
-        .map_err(|e| {
-            tracing::error!("stop_task: channel send failed: {e}");
-            format!("agent channel closed: {e}")
-        })?;
+        .stop_flag
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    // Also send the channel event as backup for when the engine is blocked on recv()
+    let _ = handle.tx.send(AgentEvent::Stop).await;
     Ok(())
 }
 

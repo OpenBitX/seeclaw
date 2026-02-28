@@ -89,3 +89,39 @@ args = [
     "./workspace",
 ]
 enabled = false
+
+[perception]
+# Number of grid rows and columns for the SoM overlay (4-26).
+# Only used as fallback when YOLO detection produces no results.
+grid_n = 12
+
+# Path to YOLOv8/YOLO11 ONNX model.
+# - "models/gpa_gui_detector.onnx" : Salesforce GPA-GUI-Detector (recommended, single-class UI element detection)
+# - "models/yolov8n.onnx"          : Generic COCO 80-class (fallback)
+# Run `uv run python scripts/download_gui_detector.py` to download the GUI model.
+yolo_model_path = "models/gpa_gui_detector.onnx"
+
+# YOLO confidence threshold (0.0–1.0). Lower = more detections, more noise.
+# GPA-GUI-Detector works well with 0.05–0.15; COCO model needs 0.3+.
+confidence_threshold = 0.05
+
+# NMS IoU threshold (0.0–1.0). Higher = allow more overlapping boxes.
+# GPA-GUI-Detector recommended: 0.5–0.7.
+iou_threshold = 0.5
+
+# Enable YOLO-based UI element detection.
+# Falls back to SoM grid if model file is missing.
+use_yolo = true
+
+# Enable Windows UI Automation for additional element info (names, types).
+# Temporarily disabled — UIA boxes overlap heavily and cause visual clutter.
+enable_ui_automation = false
+
+# Enable focus-crop second pass: crops and upscales the target region
+# for more precise VLM identification. Adds ~1s latency per step.
+enable_focus_crop = false
+
+# Custom YOLO class names. If empty, auto-detects from model:
+# - Single class ["icon"] for GPA-GUI-Detector
+# - 80 COCO classes for generic YOLOv8n
+class_names = ["icon"]

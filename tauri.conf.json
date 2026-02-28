@@ -20,7 +20,7 @@
     "windows": [
       {
         "title": "SeeClaw",
-        "width": 1000,
+        "width": 400,
         "height": 720,
         "minWidth": 400,
         "minHeight": 500,

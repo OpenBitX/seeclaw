@@ -20,6 +20,12 @@ impl LoopController {
         self.failure_count += 1;
     }
 
+    /// Reset counters for a new task cycle.
+    pub fn reset(&mut self) {
+        self.start_time = std::time::Instant::now();
+        self.failure_count = 0;
+    }
+
     pub fn should_stop(&self) -> bool {
         use crate::agent_engine::state::LoopMode;
         match &self.config.mode {

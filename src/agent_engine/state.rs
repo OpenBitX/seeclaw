@@ -4,13 +4,28 @@
 pub enum AgentState {
     Idle,
     Routing { goal: String },
-    Observing { goal: String },
+    /// Planner is generating the todo list for the goal.
     Planning { goal: String },
+    /// Executing one step from the todo list.
     Executing { action: AgentAction },
     WaitingForUser { pending_action: AgentAction },
-    Evaluating { last_result: ActionResult },
+    /// Planner is self-evaluating after all steps are done.
+    Evaluating { goal: String, steps_summary: String },
     Error { message: String },
     Done { summary: String },
+}
+
+/// A single step in the planner's todo list.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TodoStep {
+    pub index: usize,
+    pub description: String,
+    /// Whether this step requires a screen capture to locate a UI element.
+    pub needs_viewport: bool,
+    /// The UI element target description (used as VLM query), if needs_viewport.
+    pub target: Option<String>,
+    /// The action to execute once the element is located (or directly if no viewport needed).
+    pub action: AgentAction,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -30,6 +45,10 @@ pub enum AgentAction {
     Wait { milliseconds: u32 },
     FinishTask { summary: String },
     ReportFailure { reason: String, last_attempted_action: Option<String> },
+    /// Planner produces a structured todo list.
+    PlanTask { steps: Vec<TodoStep> },
+    /// Planner self-evaluates after all steps are done.
+    EvaluateCompletion { completed: bool, summary: String },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

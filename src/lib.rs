@@ -9,6 +9,7 @@ pub mod perception;
 pub mod rag;
 pub mod skills;
 
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
@@ -20,6 +21,7 @@ use crate::llm::registry::ProviderRegistry;
 /// Handle passed to Tauri commands so they can send events into the agent loop.
 pub struct AgentHandle {
     pub tx: mpsc::Sender<AgentEvent>,
+    pub stop_flag: Arc<AtomicBool>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -39,18 +41,23 @@ pub fn run() {
     let _ = dotenvy::dotenv();
 
     // Build the provider registry from config; fall back to an empty registry on error.
-    let registry = match config::load_config() {
-        Ok(cfg) => ProviderRegistry::from_config(&cfg),
+    // Load config once; extract values needed by different subsystems.
+    let (registry, perception_cfg) = match config::load_config() {
+        Ok(cfg) => {
+            let pcfg = cfg.perception.clone();
+            (ProviderRegistry::from_config(&cfg), pcfg)
+        }
         Err(e) => {
             tracing::error!(error = %e, "Failed to load config; starting with empty LLM registry");
-            ProviderRegistry::new(String::new())
+            (ProviderRegistry::new(String::new()), config::PerceptionConfig::default())
         }
     };
     let registry_state: Arc<Mutex<ProviderRegistry>> = Arc::new(Mutex::new(registry));
 
     // Create the agent event channel (buffer=32).
     let (agent_tx, agent_rx) = mpsc::channel::<AgentEvent>(32);
-    let agent_handle = Arc::new(AgentHandle { tx: agent_tx });
+    let stop_flag = Arc::new(AtomicBool::new(false));
+    let agent_handle = Arc::new(AgentHandle { tx: agent_tx, stop_flag: stop_flag.clone() });
 
     let loop_config = LoopConfig {
         mode: LoopMode::UntilDone,
@@ -74,9 +81,10 @@ pub fn run() {
         .setup(move |app| {
             let app_handle = app.handle().clone();
             let registry_for_engine = registry_state.clone();
+            let stop_flag_for_engine = stop_flag.clone();
             tracing::info!("spawning AgentEngine background task");
             tauri::async_runtime::spawn(async move {
-                let mut engine = AgentEngine::new(app_handle, loop_config, agent_rx, registry_for_engine);
+                let mut engine = AgentEngine::new(app_handle, loop_config, agent_rx, registry_for_engine, perception_cfg, stop_flag_for_engine);
                 engine.run_loop().await;
                 tracing::info!("AgentEngine task exited");
             });
