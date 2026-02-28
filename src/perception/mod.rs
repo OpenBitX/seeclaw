@@ -3,6 +3,7 @@ pub mod focus_crop;
 pub mod pipeline;
 pub mod screenshot;
 pub mod som_grid;
+pub mod stability;
 pub mod traits;
 pub mod types;
 pub mod ui_automation;

@@ -1,4 +1,4 @@
-﻿use std::sync::Arc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use base64::Engine as _;
@@ -17,6 +17,7 @@ use crate::llm::types::{ChatMessage, ContentPart, ImageUrl, MessageContent, Stre
 use crate::perception::annotator;
 use crate::perception::screenshot::capture_primary;
 use crate::perception::som_grid::{col_label, draw_som_grid, grid_cell_to_physical, parse_grid_label};
+use crate::perception::stability::{wait_for_visual_stability, StabilityConfig};
 use crate::perception::types::{ScreenshotMeta, UIElement};
 use crate::perception::yolo_detector::YoloDetector;
 
@@ -203,7 +204,7 @@ impl AgentEngine {
             }
 
             match self.state.clone() {
-                // 鈹€鈹€ Idle: wait for a new goal 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+                //  Idle: wait for a new goal 
                 AgentState::Idle => {
                     match self.event_rx.recv().await {
                         Some(AgentEvent::GoalReceived(goal)) => {
@@ -252,20 +253,15 @@ impl AgentEngine {
                     }
                 }
 
-                // 鈹€鈹€ Routing: pass-through (reserved for future intent routing) 鈹€鈹€
-                AgentState::Routing { goal } => {
-                    self.state = AgentState::Planning { goal };
-                }
-
-                // 鈹€鈹€ Planning: ask planner to produce a todo list 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+                //  Planning: ask planner to produce todo list OR evaluate completion (merged state)
                 AgentState::Planning { goal } => {
                     tracing::info!(goal = %goal, cycle = self.cycle_count, "Planning → calling planner LLM");
                     self.emit_activity("正在规划任务步骤…");
                     self.cycle_count += 1;
 
-                    match self.call_planner().await {
+                    match self.call_planner_with_context(&goal).await {
                         Ok(()) => {
-                            // After call_planner, state is set internally
+                            // After call_planner_with_context, state is set internally
                         }
                         Err(e) if self.is_stopped() => {
                             // Stopped by user — the loop top will handle the reset
@@ -278,13 +274,57 @@ impl AgentEngine {
                     }
                 }
 
-                // 鈹€鈹€ Executing: run one step 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+                //  Executing: run one step 
                 AgentState::Executing { action } => {
                     tracing::info!(?action, step = self.current_step_idx, "Executing step");
                     self.execute_action(action).await;
                 }
 
-                // 鈹€鈹€ WaitingForUser: human-in-the-loop approval 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+                //  WaitingForStability: wait for UI to stabilize after action
+                AgentState::WaitingForStability { action } => {
+                    tracing::info!(?action, "Waiting for visual stability");
+                    self.emit_activity("等待页面稳定…");
+                    
+                    let stability_config = StabilityConfig {
+                        max_wait_ms: 3000,
+                        check_interval_ms: 200,
+                        stability_threshold: 0.02,
+                        min_stable_frames: 2,
+                    };
+
+                    let stop_flag = self.stop_flag.clone();
+                    let capture_fn = || async {
+                        let result = capture_primary().await?;
+                        Ok(result.image_bytes)
+                    };
+                    
+                    match wait_for_visual_stability(
+                        capture_fn,
+                        stability_config,
+                        stop_flag,
+                    ).await {
+                        Ok(true) => {
+                            tracing::info!("Visual stability achieved");
+                            // After stability, advance to next step or re-plan
+                            Box::pin(self.advance_to_next_step()).await;
+                        }
+                        Ok(false) => {
+                            tracing::warn!("Visual stability timeout or stopped");
+                            if self.is_stopped() {
+                                // Stop flag will be handled at loop top
+                            } else {
+                                // Timeout - proceed anyway
+                                Box::pin(self.advance_to_next_step()).await;
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!(error = %e, "Visual stability check failed, proceeding anyway");
+                            Box::pin(self.advance_to_next_step()).await;
+                        }
+                    }
+                }
+
+                //  WaitingForUser: human-in-the-loop approval 
                 AgentState::WaitingForUser { pending_action } => {
                     tracing::info!(?pending_action, "waiting for user approval");
                     match self.event_rx.recv().await {
@@ -292,26 +332,10 @@ impl AgentEngine {
                             self.state = AgentState::Executing { action: pending_action };
                         }
                         Some(AgentEvent::UserRejected) | Some(AgentEvent::Stop) | None => {
-                            tracing::info!("user rejected / stop 鈫?Idle");
+                            tracing::info!("user rejected / stop → Idle");
                             self.state = AgentState::Idle;
                         }
                         _ => {}
-                    }
-                }
-
-                // ── Evaluating: planner self-evaluates after all steps done ──
-                AgentState::Evaluating { goal, steps_summary } => {
-                    tracing::info!(goal = %goal, "Evaluating completion");
-                    self.emit_activity("正在评估任务完成度…");
-                    match self.call_evaluator(&goal, &steps_summary).await {
-                        Ok(()) => {}
-                        Err(e) if self.is_stopped() => {
-                            tracing::info!("evaluator aborted by user stop");
-                        }
-                        Err(e) => {
-                            tracing::error!(error = %e, "evaluator LLM failed");
-                            self.state = AgentState::Error { message: e.to_string() };
-                        }
                     }
                 }
 
@@ -334,9 +358,9 @@ impl AgentEngine {
         tracing::info!(session = %self.history.session_id, "agent loop ended");
     }
 
-    // 鈹€鈹€ Planner: generate todo list then execute steps 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    //  Planner: generate todo list then execute steps 
 
-    async fn call_planner(&mut self) -> Result<(), String> {
+    async fn call_planner_with_context(&mut self, goal: &str) -> Result<(), String> {
         if self.is_stopped() { return Err("Stopped by user".into()); }
 
         let tools = load_builtin_tools().map_err(|e| e.to_string())?;
@@ -406,12 +430,6 @@ impl AgentEngine {
                         return Ok(());
                     }
 
-                    // evaluate_completion is also handled specially
-                    if let AgentAction::EvaluateCompletion { .. } = action {
-                        self.handle_evaluate_completion_tool(&tc).await;
-                        return Ok(());
-                    }
-
                     // finish_task / report_failure
                     if matches!(action, AgentAction::FinishTask { .. } | AgentAction::ReportFailure { .. }) {
                         self.state = AgentState::Executing { action };
@@ -425,7 +443,7 @@ impl AgentEngine {
                         let req = serde_json::json!({
                             "id": &tc.id,
                             "action": serde_json::to_value(&action).unwrap_or_default(),
-                            "reason": format!("鎵ц: {}", tc.function.name),
+                            "reason": format!("执行: {}", tc.function.name),
                             "timestamp": chrono::Utc::now().to_rfc3339(),
                         });
                         let _ = self.app.emit("action_required", &req);
@@ -433,9 +451,9 @@ impl AgentEngine {
                     }
                 }
                 Err(e) => {
-                    // Unknown tool 鈥?inject an error message back into conversation
+                    // Unknown tool - inject an error message back into conversation
                     // so the planner can self-correct on the next turn instead of silently dying
-                    tracing::warn!(error = %e, tool = %tc.function.name, "unrecognised tool call 鈥?injecting error feedback");
+                    tracing::warn!(error = %e, tool = %tc.function.name, "unrecognised tool call - injecting error feedback");
                     self.conv_messages.push(ChatMessage {
                         role: "tool".into(),
                         content: MessageContent::Text(format!(
@@ -446,30 +464,45 @@ impl AgentEngine {
                         tool_calls: None,
                     });
                     // Re-enter Planning so the model can recover
-                    self.state = AgentState::Planning { goal: self.current_goal.clone() };
+                    self.state = AgentState::Planning { goal: goal.to_string() };
                 }
             }
         } else {
-            // Content-only response 鈥?treat as done
-            tracing::info!("planner content-only response 鈫?Idle");
+            // Content-only response - treat as done
+            tracing::info!("planner content-only response → Idle");
             self.state = AgentState::Idle;
         }
 
         Ok(())
     }
 
-    /// Advance to the next pending step, or move to Evaluating if all steps done.
+    /// Advance to the next pending step, or move to Planning for evaluation if all steps done.
     async fn advance_to_next_step(&mut self) {
         // Bail out immediately if stop was requested
         if self.is_stopped() { return; }
 
         if self.current_step_idx >= self.todo_steps.len() {
-            // All steps done 鈫?self-evaluate
+            // All steps done → implicit evaluation via Planning with context
             let summary = self.steps_log.join("\n");
-            self.state = AgentState::Evaluating {
-                goal: self.current_goal.clone(),
-                steps_summary: summary,
-            };
+            
+            // Build evaluation prompt and inject into conversation
+            let eval_prompt = format!(
+                "Goal: {}\n\nCompleted steps:\n{}\n\n\
+                 Did you fully achieve the goal? \
+                 If yes, call `finish_task` with a summary. \
+                 If not, call `plan_task` with a revised plan (max 3 retries total, this is cycle {}).",
+                self.current_goal, summary, self.cycle_count
+            );
+
+            self.conv_messages.push(ChatMessage {
+                role: "user".into(),
+                content: MessageContent::Text(eval_prompt),
+                tool_call_id: None,
+                tool_calls: None,
+            });
+
+            // Re-enter Planning for implicit evaluation
+            self.state = AgentState::Planning { goal: self.current_goal.clone() };
             return;
         }
 
@@ -488,11 +521,11 @@ impl AgentEngine {
         );
 
         if step.needs_viewport {
-            // Need to see the screen first 鈥?take screenshot and ask VLM
+            // Need to see the screen first ?take screenshot and ask VLM
             if action_supports_element_id(&step.action) {
                 match self.call_vlm_for_step(&step).await {
                     Ok(Some(cell)) => {
-                        // VLM found the element 鈥?patch the action's element_id
+                        // VLM found the element ?patch the action's element_id
                         let action = patch_element_id(step.action.clone(), &cell);
                         self.dispatch_step_action(action).await;
                     }
@@ -721,65 +754,7 @@ impl AgentEngine {
         }
     }
 
-    // 鈹€鈹€ Evaluator: self-evaluate after all steps 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-
-    async fn call_evaluator(&mut self, goal: &str, steps_summary: &str) -> Result<(), String> {
-        if self.is_stopped() { return Err("Stopped by user".into()); }
-
-        // Anti-loop guard: max 3 cycles
-        if self.cycle_count > 3 {
-            tracing::warn!("max cycles reached 鈫?forcing finish");
-            self.state = AgentState::Done {
-                summary: format!("Reached max retry cycles. Last steps:\n{steps_summary}"),
-            };
-            return Ok(());
-        }
-
-        let eval_prompt = format!(
-            "Goal: {goal}\n\nCompleted steps:\n{steps_summary}\n\n\
-             Did you fully achieve the goal? \
-             If yes, call `finish_task` with a summary. \
-             If not, call `plan_task` with a revised plan (max 3 retries total, this is cycle {}).",
-            self.cycle_count
-        );
-
-        self.conv_messages.push(ChatMessage {
-            role: "user".into(),
-            content: MessageContent::Text(eval_prompt),
-            tool_call_id: None,
-            tool_calls: None,
-        });
-
-        // Reuse planner call 鈥?it will either finish_task or plan_task again
-        self.call_planner().await
-    }
-
-    async fn handle_evaluate_completion_tool(&mut self, tc: &ToolCall) {
-        let args: serde_json::Value = serde_json::from_str(&tc.function.arguments)
-            .unwrap_or(serde_json::json!({}));
-        let completed = args["completed"].as_bool().unwrap_or(false);
-        let summary = args["summary"].as_str().unwrap_or("").to_string();
-
-        self.conv_messages.push(ChatMessage {
-            role: "tool".into(),
-            content: MessageContent::Text(format!("Evaluation recorded: completed={completed}")),
-            tool_call_id: Some(self.pending_tool_id.clone()),
-            tool_calls: None,
-        });
-
-        if completed {
-            self.state = AgentState::Done { summary };
-        } else if self.cycle_count <= 3 {
-            // Retry: go back to planning
-            self.state = AgentState::Planning { goal: self.current_goal.clone() };
-        } else {
-            self.state = AgentState::Done {
-                summary: format!("Could not complete after 3 cycles: {summary}"),
-            };
-        }
-    }
-
-    // 鈹€鈹€ Action execution 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    //  Action execution 
 
     async fn execute_action(&mut self, action: AgentAction) {
         // Bail out immediately if stop was requested
@@ -958,31 +933,6 @@ impl AgentEngine {
                 return;
             }
 
-            AgentAction::EvaluateCompletion { completed, ref summary } => {
-                tracing::info!(completed, summary = %summary, "EvaluateCompletion step executed");
-                if completed {
-                    // Task done
-                    let _ = self.app.emit("llm_stream_chunk", &StreamChunk {
-                        kind: StreamChunkKind::Content,
-                        content: summary.clone(),
-                    });
-                    let _ = self.app.emit("llm_stream_chunk", &StreamChunk {
-                        kind: StreamChunkKind::Done,
-                        content: String::new(),
-                    });
-                    self.conv_messages.push(ChatMessage {
-                        role: "tool".into(),
-                        content: MessageContent::Text(format!("Task complete: {summary}")),
-                        tool_call_id: Some(self.pending_tool_id.clone()),
-                        tool_calls: None,
-                    });
-                    self.state = AgentState::Done { summary: summary.clone() };
-                    return;
-                } else {
-                    (true, format!("Evaluation: completed=false, summary={}", summary))
-                }
-            }
-
             // GetViewport called directly (model bypassed plan_task) — take screenshot,
             // inject it into conversation, and re-enter Planning so the model can proceed.
             AgentAction::GetViewport { .. } => {
@@ -1099,14 +1049,33 @@ impl AgentEngine {
             .map(|s| s.description.clone())
             .unwrap_or_else(|| format!("step {}", self.current_step_idx));
         self.steps_log.push(format!(
-            "Step {}: {} 鈥?{}",
+            "Step {}: {} - {}",
             self.current_step_idx + 1,
             step_desc,
             if ok { msg } else { format!("FAILED: {msg}") }
         ));
         self.current_step_idx += 1;
 
-        Box::pin(self.advance_to_next_step()).await;
+        // Check if we need to wait for visual stability after this action
+        // Actions that typically trigger UI changes: clicks, typing, hotkeys, scrolls
+        let needs_stability = matches!(
+            action,
+            AgentAction::MouseClick { .. }
+                | AgentAction::MouseDoubleClick { .. }
+                | AgentAction::MouseRightClick { .. }
+                | AgentAction::TypeText { .. }
+                | AgentAction::Hotkey { .. }
+                | AgentAction::KeyPress { .. }
+                | AgentAction::Scroll { .. }
+        );
+
+        if needs_stability && ok {
+            // Wait for visual stability before advancing
+            self.state = AgentState::WaitingForStability { action };
+        } else {
+            // No stability needed or action failed - advance directly
+            Box::pin(self.advance_to_next_step()).await;
+        }
     }
 
     fn push_history(&mut self, action: &AgentAction, result: &ActionResult) {
@@ -1120,7 +1089,7 @@ impl AgentEngine {
     }
 }
 
-// 鈹€鈹€ Safety check 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+//  Safety check 鈹€
 
 fn is_auto_approved(action: &AgentAction) -> bool {
     matches!(
@@ -1129,7 +1098,6 @@ fn is_auto_approved(action: &AgentAction) -> bool {
             | AgentAction::Wait { .. }
             | AgentAction::FinishTask { .. }
             | AgentAction::ReportFailure { .. }
-            | AgentAction::EvaluateCompletion { .. }
             | AgentAction::MouseClick { .. }
             | AgentAction::MouseDoubleClick { .. }
             | AgentAction::MouseRightClick { .. }
@@ -1140,10 +1108,10 @@ fn is_auto_approved(action: &AgentAction) -> bool {
     )
 }
 
-// 鈹€鈹€ Tool call parser 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+//  Tool call parser 
 
 fn parse_tool_call_to_action(tc: &ToolCall) -> Result<AgentAction, String> {
-    // Tolerate malformed JSON arguments 鈥?fall back to empty object
+    // Tolerate malformed JSON arguments ?fall back to empty object
     let args: serde_json::Value = serde_json::from_str(&tc.function.arguments)
         .unwrap_or_else(|e| {
             tracing::warn!(error = %e, raw = %tc.function.arguments, "tool args JSON parse failed, using {{}}");
@@ -1198,10 +1166,6 @@ fn parse_tool_call_to_action(tc: &ToolCall) -> Result<AgentAction, String> {
             }
             Ok(AgentAction::PlanTask { steps })
         }
-        "evaluate_completion" => Ok(AgentAction::EvaluateCompletion {
-            completed: args["completed"].as_bool().unwrap_or(false),
-            summary: args["summary"].as_str().unwrap_or("").to_string(),
-        }),
         other => parse_action_by_name(other, &args),
     }
 }
@@ -1257,10 +1221,6 @@ fn parse_action_by_name(name: &str, args: &serde_json::Value) -> Result<AgentAct
         "report_failure" => Ok(AgentAction::ReportFailure {
             reason: args["reason"].as_str().unwrap_or("").to_string(),
             last_attempted_action: args["last_attempted_action"].as_str().map(|s| s.to_string()),
-        }),
-        "evaluate_completion" => Ok(AgentAction::EvaluateCompletion {
-            completed: args["completed"].as_bool().unwrap_or(false),
-            summary: args["summary"].as_str().unwrap_or("").to_string(),
         }),
         other => Err(format!("unknown tool: {other}")),
     }

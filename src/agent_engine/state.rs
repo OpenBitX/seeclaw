@@ -1,16 +1,18 @@
-/// Lifecycle states of the SeeClaw agent.
+/// Lifecycle Optimized states of the SeeClaw agent.
+/// Improved architecture: Removed Evaluating state (merged into Planning),
+/// Removed Routing state (now a micro-operation).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum AgentState {
     Idle,
-    Routing { goal: String },
-    /// Planner is generating the todo list for the goal.
+    /// Planner is generating the todo list for the goal OR evaluating completion.
+    /// This combines the old Planning and Evaluating states for efficiency.
     Planning { goal: String },
     /// Executing one step from the todo list.
     Executing { action: AgentAction },
+    /// Waiting for visual stability after an action.
+    WaitingForStability { action: AgentAction },
     WaitingForUser { pending_action: AgentAction },
-    /// Planner is self-evaluating after all steps are done.
-    Evaluating { goal: String, steps_summary: String },
     Error { message: String },
     Done { summary: String },
 }
@@ -47,8 +49,6 @@ pub enum AgentAction {
     ReportFailure { reason: String, last_attempted_action: Option<String> },
     /// Planner produces a structured todo list.
     PlanTask { steps: Vec<TodoStep> },
-    /// Planner self-evaluates after all steps are done.
-    EvaluateCompletion { completed: bool, summary: String },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

@@ -1,2 +1,3 @@
-pub mod loader;
-pub mod types;
+pub mod manager;
+
+pub use manager::{Skill, SkillMetadata, SkillsConfig, SkillsManager};
