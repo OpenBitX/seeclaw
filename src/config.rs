@@ -219,10 +219,14 @@ fn find_config_path() -> SeeClawResult<PathBuf> {
 fn write_config_path() -> SeeClawResult<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
-            return Ok(parent.join("config.toml"));
+            let path = parent.join("config.toml");
+            tracing::debug!(path = %path.display(), "write_config_path: using exe-adjacent path");
+            return Ok(path);
         }
     }
-    Ok(std::env::current_dir()?.join("config.toml"))
+    let path = std::env::current_dir()?.join("config.toml");
+    tracing::debug!(path = %path.display(), "write_config_path: using working directory path");
+    Ok(path)
 }
 
 pub fn load_config() -> SeeClawResult<AppConfig> {
@@ -240,4 +244,11 @@ pub fn save_config(config: &AppConfig) -> SeeClawResult<()> {
     std::fs::write(&path, content)?;
     tracing::info!(path = %path.display(), "config saved");
     Ok(())
+}
+
+/// Get the path where config will be written/read.
+/// Returns the absolute path as a string for display in UI.
+pub fn get_config_path() -> SeeClawResult<String> {
+    let path = write_config_path()?;
+    Ok(path.display().to_string())
 }

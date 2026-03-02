@@ -55,6 +55,10 @@ impl LlmProvider for OpenAiCompatibleProvider {
             body["tool_choice"] = serde_json::json!("auto");
         }
 
+        if cfg.json_mode {
+            body["response_format"] = serde_json::json!({ "type": "json_object" });
+        }
+
         tracing::debug!(
             provider = %self.id,
             model = %cfg.model,

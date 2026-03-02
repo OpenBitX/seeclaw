@@ -87,7 +87,9 @@ const AppInner = observer(() => {
   useTauriEvent<StreamChunk>('llm_stream_chunk', handleStreamChunk);
 
   const handleStateChange = useCallback((payload: AgentStatePayload) => {
-    agentStore.setState(payload.state);
+    // Extract terminal message from payload (error message or completion summary)
+    const terminalMessage = payload.message || payload.summary;
+    agentStore.setState(payload.state, terminalMessage);
     // Pre-open an assistant message bubble for states that will stream LLM content,
     // so the "thinking" indicator appears immediately without waiting for the first chunk.
     if (payload.state === 'planning' || payload.state === 'evaluating') {

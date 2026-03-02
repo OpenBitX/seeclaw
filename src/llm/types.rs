@@ -101,4 +101,6 @@ pub struct CallConfig {
     /// Use for internal calls (e.g. VLM element-location queries) that should
     /// be invisible to the user.
     pub silent: bool,
+    /// When true, force the LLM to respond with valid JSON (response_format: json_object).
+    pub json_mode: bool,
 }

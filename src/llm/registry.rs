@@ -93,6 +93,7 @@ impl ProviderRegistry {
                 stream: entry.stream,
                 temperature,
                 silent: false,
+                json_mode: false,
             }));
         }
 
@@ -108,7 +109,7 @@ impl ProviderRegistry {
             model = %model,
             "role not configured, using active provider fallback"
         );
-        Ok((provider, CallConfig { model, stream: true, temperature, silent: false }))
+        Ok((provider, CallConfig { model, stream: true, temperature, silent: false, json_mode: false }))
     }
 
     /// Build a registry from the loaded app config.

@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { observer } from 'mobx-react-lite';
 import { motion, AnimatePresence } from 'framer-motion';
 import Box from '@mui/joy/Box';
@@ -78,6 +79,13 @@ const DOT_COLORS: Record<string, string> = {
 
 export const StatusCapsule = observer(() => {
   const { state, isRunning, elapsedMs, loopCount, failureCount } = agentStore;
+
+  // Tick the elapsed timer every 500 ms while a task is running
+  useEffect(() => {
+    if (!isRunning) return;
+    const id = setInterval(() => agentStore.tickElapsed(), 500);
+    return () => clearInterval(id);
+  }, [isRunning]);
   const label = STATE_LABELS[state] ?? state;
   const color = STATE_COLORS[state] ?? 'neutral';
 

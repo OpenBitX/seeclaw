@@ -84,4 +84,8 @@ export interface ApprovalRequest {
 /** Rust backend emits AgentState as `{ state: "idle" | "routing" | ... }` */
 export interface AgentStatePayload {
   state: AgentStateKind;
+  /** Summary message when state is 'done' */
+  summary?: string;
+  /** Error message when state is 'error' */
+  message?: string;
 }

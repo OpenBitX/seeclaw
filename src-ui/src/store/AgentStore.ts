@@ -19,7 +19,10 @@ class AgentStore {
   pendingApproval: ApprovalRequest | null = null;
   /** Fine-grained activity label emitted by the engine (e.g. "正在截取屏幕…"). */
   latestActivity: string | null = null;
-
+  /** Timestamp (Date.now()) when the current task started. Null when idle. */
+  taskStartedAt: number | null = null;
+  /** Error message or completion summary for terminal states */
+  terminalMessage: string | null = null;
   private currentStreamingId: string | null = null;
   private streamStartedAt: number | null = null;
 
@@ -98,16 +101,77 @@ class AgentStore {
     }
   }
 
-  setState(state: AgentStateKind): void {
+  setState(state: AgentStateKind, terminalMessage?: string): void {
+    const wasRunning = this.isRunning;
     this.state = state;
     // Clear fine-grained activity on state transitions
     this.latestActivity = null;
+
+    // Start client-side timer when transitioning from idle → active
+    if (!wasRunning && this.isRunning) {
+      this.taskStartedAt = Date.now();
+      this.elapsedMs = 0;
+      this.terminalMessage = null; // Clear any previous terminal message
+    }
+
     if (state === 'idle' || state === 'done' || state === 'error') {
-      if (this.currentStreamingId) {
-        const msg = this.messages.find((m) => m.id === this.currentStreamingId);
-        if (msg) msg.isStreaming = false;
-        this.currentStreamingId = null;
+      // Freeze elapsed on terminal state
+      if (this.taskStartedAt !== null) {
+        this.elapsedMs = Date.now() - this.taskStartedAt;
+        this.taskStartedAt = null;
       }
+
+      if (terminalMessage) {
+        this.terminalMessage = terminalMessage;
+      }
+
+      if (this.currentStreamingId) {
+        // Race condition: `done` state arrived before the stream's Done chunk.
+        // The streaming message IS the LLM response — close it and fill in the
+        // summary if the content is still empty/incomplete.
+        const msg = this.messages.find((m) => m.id === this.currentStreamingId);
+        if (msg) {
+          if (terminalMessage && !msg.content) {
+            // Stream content hasn't arrived yet — use the summary directly
+            msg.content = terminalMessage;
+          }
+          if (this.streamStartedAt !== null) {
+            msg.durationMs = Date.now() - this.streamStartedAt;
+            this.streamStartedAt = null;
+          }
+          msg.isStreaming = false;
+        }
+        this.currentStreamingId = null;
+        // The streaming message already holds the response — no new message needed.
+        return;
+      }
+
+      // No active streaming message: add a new one only if the last message
+      // doesn't already show the same content (deduplication).
+      if (terminalMessage) {
+        const lastMsg = this.lastMessage;
+        const alreadyShown =
+          lastMsg &&
+          lastMsg.role === 'assistant' &&
+          lastMsg.content === terminalMessage;
+
+        if (!alreadyShown) {
+          this.messages.push({
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: terminalMessage,
+            timestamp: new Date().toISOString(),
+            isStreaming: false,
+          });
+        }
+      }
+    }
+  }
+
+  /** Called by a setInterval in StatusCapsule to keep elapsed time ticking. */
+  tickElapsed(): void {
+    if (this.taskStartedAt !== null) {
+      this.elapsedMs = Date.now() - this.taskStartedAt;
     }
   }
 
@@ -164,8 +228,10 @@ class AgentStore {
     this.failureCount = 0;
     this.loopCount = 0;
     this.elapsedMs = 0;
+    this.taskStartedAt = null;
     this.pendingApproval = null;
     this.latestActivity = null;
+    this.terminalMessage = null;
     this.currentStreamingId = null;
     this.streamStartedAt = null;
   }

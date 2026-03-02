@@ -34,6 +34,16 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": []
+    "icon": [],
+    "resources": [
+      "config.toml",
+      "prompts",
+      "models"
+    ],
+    "windows": {
+      "wix": {
+        "language": "en-US"
+      }
+    }
   }
 }

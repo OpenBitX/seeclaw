@@ -1,5 +1,2 @@
-pub mod coordinator;
-pub mod dispatcher;
+// coordinator, dispatcher, safety, text_input removed — logic now lives in agent_engine nodes
 pub mod input;
-pub mod safety;
-pub mod text_input;

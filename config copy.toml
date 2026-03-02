@@ -1,5 +1,5 @@
 [llm]
-active_provider = "doubao"
+active_provider = "zhipu"
 
 [llm.providers.openai]
 display_name = "OpenAI"
@@ -12,13 +12,6 @@ api_key = ""
 display_name = "DeepSeek"
 api_base = "https://api.deepseek.com/v1/chat/completions"
 model = "deepseek-chat"
-temperature = 0.1
-api_key = ""
-
-[llm.providers.doubao]
-display_name = "豆包 Doubao-Seed-2.0"
-api_base = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
-model = "doubao-seed-2-0-mini-260215"
 temperature = 0.1
 api_key = ""
 
@@ -51,23 +44,23 @@ temperature = 0.2
 api_key = ""
 
 [llm.roles.routing]
-provider = "doubao"
-model = "doubao-seed-2-0-mini-260215"
+provider = "zhipu"
+model = "glm-4-flash"
 stream = false
 
 [llm.roles.chat]
-provider = "doubao"
-model = "doubao-seed-2-0-mini-260215"
+provider = "zhipu"
+model = "glm-4-flash"
 stream = true
 
 [llm.roles.tools]
-provider = "doubao"
-model = "doubao-seed-2-0-mini-260215"
+provider = "zhipu"
+model = "glm-4-flash-250414"
 stream = true
 
 [llm.roles.vision]
-provider = "doubao"
-model = "doubao-seed-2-0-mini-260215"
+provider = "zhipu"
+model = "glm-4.6v"
 stream = true
 
 [safety]
