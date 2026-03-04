@@ -137,6 +137,7 @@ pub fn is_auto_approved(action: &AgentAction) -> bool {
             | AgentAction::Hotkey { .. }
             | AgentAction::KeyPress { .. }
             | AgentAction::Scroll { .. }
+            | AgentAction::InvokeSkill { .. }
     )
 }
 
@@ -179,6 +180,7 @@ fn parse_plan_task(args: &serde_json::Value) -> Result<AgentAction, String> {
     for (i, s) in raw_steps.iter().enumerate() {
         // Determine step mode: new field "mode" or legacy "needs_viewport" fallback
         let mode = match s["mode"].as_str() {
+            Some("combo") => StepMode::Combo,
             Some("visual_locate") => StepMode::VisualLocate,
             Some("visual_act") => StepMode::VisualAct,
             Some("direct") => StepMode::Direct,
@@ -197,6 +199,14 @@ fn parse_plan_task(args: &serde_json::Value) -> Result<AgentAction, String> {
             parse_step_tool_calls(s, i)
         } else {
             Vec::new()
+        };
+
+        // Parse skill + params for Combo mode
+        let skill = s["skill"].as_str().map(|t| t.to_string());
+        let params = if mode == StepMode::Combo {
+            s.get("params").cloned()
+        } else {
+            None
         };
 
         // Parse action_template for VisualLocate mode
@@ -218,6 +228,8 @@ fn parse_plan_task(args: &serde_json::Value) -> Result<AgentAction, String> {
             index: i,
             description: s["description"].as_str().unwrap_or("").to_string(),
             mode,
+            skill,
+            params,
             tool_calls,
             target: s["target"].as_str().map(|t| t.to_string()),
             action_template,

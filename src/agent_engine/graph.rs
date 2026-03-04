@@ -121,8 +121,11 @@ impl Graph {
             // Emit state so frontend can track progress — map node name to UI state kind
             let ui_state = match current.as_str() {
                 "router"       => "routing",
+                "simple_chat"  => "responding",
                 "planner"      => "planning",
                 "vlm_observe"  => "observing",
+                "vlm_act"      => "observing",
+                "summarizer"   => "evaluating",
                 "verifier"     => "evaluating",
                 "user_confirm" => "waiting_for_user",
                 _              => "executing",

@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use serde::{Deserialize, Serialize};
 
+use crate::skills::registry::{ComboDefinition, SkillManifest, SkillRegistry};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Skill {
     pub name: String,
@@ -343,6 +345,135 @@ impl SkillsManager {
             if let Some(skill) = self.skills.get_mut(skill_name) {
                 skill.enabled = true;
             }
+        }
+    }
+}
+
+// ── Registry builder ───────────────────────────────────────────────────────
+
+/// Load a `SkillRegistry` from the skills directory.
+///
+/// Scans for `*.manifest.md` and `*.combo.json` files and populates the
+/// registry. This is the new entry point that replaces the old full-content
+/// approach.
+pub async fn load_skill_registry(skills_dir: &str) -> SkillRegistry {
+    let mut registry = SkillRegistry::new();
+    let dir = Path::new(skills_dir);
+
+    if !dir.exists() {
+        tracing::warn!("Skills directory does not exist: {}", skills_dir);
+        return registry;
+    }
+
+    if let Err(e) = scan_skill_dir(dir, dir, &mut registry).await {
+        tracing::warn!(error = %e, "Failed to scan skill directory");
+    }
+
+    tracing::info!(
+        manifests = registry.skill_names().len(),
+        "Skill registry loaded"
+    );
+    registry
+}
+
+/// Recursively scan a directory for manifest and combo files.
+async fn scan_skill_dir(
+    root: &Path,
+    dir: &Path,
+    registry: &mut SkillRegistry,
+) -> Result<(), String> {
+    let mut entries = tokio::fs::read_dir(dir)
+        .await
+        .map_err(|e| format!("read_dir failed: {e}"))?;
+
+    loop {
+        match entries.next_entry().await {
+            Ok(Some(entry)) => {
+                let path = entry.path();
+                if path.is_dir() {
+                    Box::pin(scan_skill_dir(root, &path, registry)).await?;
+                } else if let Some(fname) = path.file_name().and_then(|f| f.to_str()) {
+                    if fname.ends_with(".manifest.md") {
+                        if let Some(m) = parse_manifest_file(&path, root).await {
+                            tracing::debug!(name = %m.name, "loaded manifest");
+                            registry.add_manifest(m);
+                        }
+                    } else if fname.ends_with(".combo.json") {
+                        if let Some(c) = parse_combo_file(&path).await {
+                            tracing::debug!(name = %c.name, "loaded combo");
+                            registry.add_combo(c);
+                        }
+                    }
+                }
+            }
+            Ok(None) => break,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to read dir entry");
+                continue;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Parse a `.manifest.md` file into a `SkillManifest`.
+///
+/// Expected format (key: value per line):
+/// ```text
+/// name: open_software
+/// description: ...
+/// params: [software_name]
+/// triggers: ...
+/// ```
+async fn parse_manifest_file(path: &Path, root: &Path) -> Option<SkillManifest> {
+    let content = tokio::fs::read_to_string(path).await.ok()?;
+
+    let mut name = String::new();
+    let mut description = String::new();
+    let mut params = Vec::new();
+    let mut triggers = String::new();
+
+    for line in content.lines() {
+        let line = line.trim();
+        if let Some(val) = line.strip_prefix("name:") {
+            name = val.trim().to_string();
+        } else if let Some(val) = line.strip_prefix("description:") {
+            description = val.trim().to_string();
+        } else if let Some(val) = line.strip_prefix("params:") {
+            // Parse [a, b, c] format
+            let val = val.trim().trim_start_matches('[').trim_end_matches(']');
+            params = val.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+        } else if let Some(val) = line.strip_prefix("triggers:") {
+            triggers = val.trim().to_string();
+        }
+    }
+
+    // Derive skill name from file path if not specified
+    if name.is_empty() {
+        let rel = path.strip_prefix(root).ok()?;
+        name = rel
+            .to_string_lossy()
+            .replace('\\', "/")
+            .trim_end_matches(".manifest.md")
+            .to_string();
+    }
+
+    Some(SkillManifest {
+        name,
+        description,
+        params,
+        triggers,
+    })
+}
+
+/// Parse a `.combo.json` file into a `ComboDefinition`.
+async fn parse_combo_file(path: &Path) -> Option<ComboDefinition> {
+    let content = tokio::fs::read_to_string(path).await.ok()?;
+    match serde_json::from_str::<ComboDefinition>(&content) {
+        Ok(combo) => Some(combo),
+        Err(e) => {
+            tracing::warn!(path = %path.display(), error = %e, "failed to parse combo file");
+            None
         }
     }
 }

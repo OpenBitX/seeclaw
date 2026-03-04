@@ -40,7 +40,6 @@ impl Node for RouterNode {
         let result = self.pipeline.classify(&state.goal, ctx).await;
 
         state.route_type = result.route_type.clone();
-        state.simple_tool_calls = result.tool_calls;
 
         tracing::info!(
             route = ?state.route_type,

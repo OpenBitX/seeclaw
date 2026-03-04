@@ -14,9 +14,10 @@ use crate::agent_engine::node::{poll_stop, Node, NodeOutput};
 use crate::agent_engine::state::{AgentAction, GraphResult, SharedState};
 use crate::agent_engine::tool_parser::parse_tool_call_to_action;
 use crate::llm::tools::load_builtin_tools;
-use crate::llm::types::{ChatMessage, MessageContent, StreamChunk, StreamChunkKind};
+use crate::llm::types::{ChatMessage, ContentPart, ImageUrl, MessageContent, StreamChunk, StreamChunkKind};
+use crate::perception::screenshot::capture_primary;
 
-const PLANNER_SYSTEM: &str = include_str!("../../../prompts/system/tools_agent.md");
+const PLANNER_SYSTEM: &str = include_str!("../../../prompts/system/planner.md");
 
 pub struct PlannerNode;
 
@@ -47,16 +48,52 @@ impl Node for PlannerNode {
 
         // Initialise conversation if empty (first call)
         if state.conv_messages.is_empty() {
+            // Build system prompt: base prompt + skills context (if any)
+            let system_prompt = if ctx.skills_context.is_empty() {
+                PLANNER_SYSTEM.to_string()
+            } else {
+                format!("{}\n\n{}", PLANNER_SYSTEM, ctx.skills_context)
+            };
+
+            // Capture an initial screenshot so the planner can see the current
+            // screen state and make better-informed plans for GUI tasks.
+            let user_content = match capture_primary().await {
+                Ok(shot) => {
+                    tracing::info!("PlannerNode: initial screenshot captured for planning context");
+                    // Show the screenshot to the user
+                    let _ = ctx.app.emit("viewport_captured", serde_json::json!({
+                        "image_base64": &shot.image_base64,
+                        "source": "planner_initial",
+                    }));
+                    let _ = ctx.app.emit("agent_activity", serde_json::json!({
+                        "text": "已截取当前屏幕，正在结合画面制定计划…"
+                    }));
+                    let data_url = format!("data:image/jpeg;base64,{}", shot.image_base64);
+                    MessageContent::Parts(vec![
+                        ContentPart::ImageUrl {
+                            image_url: ImageUrl { url: data_url },
+                        },
+                        ContentPart::Text {
+                            text: state.goal.clone(),
+                        },
+                    ])
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "PlannerNode: initial screenshot failed, planning without visual context");
+                    MessageContent::Text(state.goal.clone())
+                }
+            };
+
             state.conv_messages = vec![
                 ChatMessage {
                     role: "system".into(),
-                    content: MessageContent::Text(PLANNER_SYSTEM.into()),
+                    content: MessageContent::Text(system_prompt),
                     tool_call_id: None,
                     tool_calls: None,
                 },
                 ChatMessage {
                     role: "user".into(),
-                    content: MessageContent::Text(state.goal.clone()),
+                    content: user_content,
                     tool_call_id: None,
                     tool_calls: None,
                 },
@@ -67,11 +104,12 @@ impl Node for PlannerNode {
         let tools = load_builtin_tools().map_err(|e| e.to_string())?;
         let messages = state.conv_messages.clone();
 
-        // Get provider
-        let (provider, cfg) = {
+        // Get provider — planner reasoning is internal, don't stream to frontend
+        let (provider, mut cfg) = {
             let reg = ctx.registry.lock().await;
             reg.call_config_for_role("tools").map_err(|e| e.to_string())?
         };
+        cfg.silent = true;
 
         // Race LLM call against stop flag
         let flag = state.stop_flag.clone();

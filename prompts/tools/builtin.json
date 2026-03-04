@@ -230,7 +230,7 @@
     "type": "function",
     "function": {
       "name": "plan_task",
-      "description": "MUST be called first. Produce a step-by-step todo list to accomplish the goal. Each step is one atomic action. For steps that require clicking a UI element, set needs_viewport=true and describe the target in 'target' — the vision model will locate it for you.",
+      "description": "MUST be called first. Produce a step-by-step todo list. Each step has a 'mode' that controls execution: 'combo' runs a pre-defined skill sequence (fastest, zero LLM), 'direct' uses inline tool_calls, 'visual_locate' uses VLM to find a UI element, 'visual_act' uses VLM for complex visual tasks. ALWAYS prefer mode=combo when a matching skill exists.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -240,48 +240,85 @@
             "items": {
               "type": "object",
               "properties": {
-                "action_type": {
-                  "type": "string",
-                  "description": "Action to perform. Use one of: mouse_click, mouse_double_click, mouse_right_click, type_text, hotkey, key_press, execute_terminal, wait, scroll."
-                },
                 "description": {
                   "type": "string",
                   "description": "Human-readable description of what this step does."
                 },
-                "needs_viewport": {
-                  "type": "boolean",
-                  "description": "Set true if this step requires locating a UI element on screen. The vision model will find the grid cell — do NOT guess element_id."
+                "mode": {
+                  "type": "string",
+                  "enum": ["combo", "direct", "visual_locate", "visual_act"],
+                  "description": "Execution mode. combo=pre-defined skill (fastest). direct=inline tool_calls. visual_locate=VLM locates element then executes action. visual_act=VLM autonomous."
+                },
+                "skill": {
+                  "type": "string",
+                  "description": "For mode=combo: skill name (e.g. 'open_software'). Must match an available skill."
+                },
+                "params": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "description": "For mode=combo: named parameters the skill requires (e.g. {\"software_name\": \"Chrome\"})."
+                },
+                "tool_calls": {
+                  "type": "array",
+                  "description": "For mode=direct: array of tool calls to execute sequentially.",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "description": "Tool name: mouse_click, type_text, hotkey, key_press, wait, scroll, execute_terminal, etc."
+                      },
+                      "arguments": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "description": "Tool arguments."
+                      }
+                    },
+                    "required": ["name", "arguments"]
+                  }
                 },
                 "target": {
                   "type": "string",
-                  "description": "Description of the UI element to locate. Required when needs_viewport=true."
+                  "description": "For mode=visual_locate: description of the UI element for VLM to find."
+                },
+                "action_type": {
+                  "type": "string",
+                  "description": "For mode=visual_locate: the action to perform after locating (mouse_click, etc.)."
+                },
+                "vlm_goal": {
+                  "type": "string",
+                  "description": "For mode=visual_act: sub-goal description for VLM autonomous execution."
+                },
+                "needs_viewport": {
+                  "type": "boolean",
+                  "description": "DEPRECATED. Use mode=visual_locate or mode=visual_act instead."
                 },
                 "text": {
                   "type": "string",
-                  "description": "For type_text steps: the text to type."
+                  "description": "For direct mode type_text: the text to type."
                 },
                 "keys": {
                   "type": "string",
-                  "description": "For hotkey steps: key combo, e.g. ctrl+c."
+                  "description": "For direct mode hotkey: key combo, e.g. ctrl+c."
                 },
                 "key": {
                   "type": "string",
-                  "description": "For key_press steps: single key name, e.g. Enter."
+                  "description": "For direct mode key_press: single key name, e.g. Enter."
                 },
                 "command": {
                   "type": "string",
-                  "description": "For execute_terminal steps: the PowerShell command."
+                  "description": "For direct mode execute_terminal: the PowerShell command."
                 },
                 "milliseconds": {
                   "type": "integer",
-                  "description": "For wait steps: duration in ms (100–10000)."
+                  "description": "For direct mode wait: duration in ms (100–10000)."
                 },
                 "direction": {
                   "type": "string",
-                  "description": "For scroll steps: up, down, left, or right."
+                  "description": "For direct mode scroll: up, down, left, or right."
                 }
               },
-              "required": ["action_type", "description", "needs_viewport"]
+              "required": ["description", "mode"]
             }
           }
         },

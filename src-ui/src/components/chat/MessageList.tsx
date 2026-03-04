@@ -6,6 +6,7 @@ import Typography from '@mui/joy/Typography';
 import { agentStore } from '../../store/AgentStore';
 import { StreamingMessage } from './StreamingMessage';
 import { ApprovalCard } from '../shared/ApprovalCard';
+import { TodoList } from '../shared/TodoList';
 import { formatTimestamp, formatDuration } from '../../utils/format';
 
 export const MessageList = observer(() => {
@@ -80,6 +81,11 @@ export const MessageList = observer(() => {
                   <Typography level="body-md" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                     {msg.content}
                   </Typography>
+                </Box>
+              ) : msg.todoSteps && msg.todoSteps.length > 0 ? (
+                /* Inline task plan — rendered as a TodoList within the conversation flow */
+                <Box sx={{ width: '100%', maxWidth: 680 }}>
+                  <TodoList steps={msg.todoSteps} done={msg.isTodoDone ?? false} />
                 </Box>
               ) : msg.role === 'tool' && msg.screenshotBase64 ? (
                 <Box sx={{ width: '100%', maxWidth: 680 }}>

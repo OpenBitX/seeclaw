@@ -12,7 +12,7 @@ use crate::agent_engine::context::NodeContext;
 use crate::agent_engine::history::HistoryEntry;
 use crate::agent_engine::node::{poll_stop, Node, NodeOutput};
 use crate::agent_engine::state::{AgentAction, GraphResult, SharedState};
-use crate::agent_engine::tool_parser::{is_auto_approved, needs_stability_wait};
+use crate::agent_engine::tool_parser::{is_auto_approved, needs_stability_wait, parse_action_by_name};
 use crate::executor::input;
 use crate::llm::types::{ChatMessage, MessageContent, StreamChunk, StreamChunkKind};
 use crate::perception::screenshot::capture_primary;
@@ -348,6 +348,68 @@ async fn execute_action_impl(
             // Scroll is auto-approved; here we just handle the basic case
             (true, format!("Scrolled {direction} ({distance})"))
         }
+        AgentAction::InvokeSkill { skill_name, inputs } => {
+            // Fallback: if invoke_skill reaches action_exec (LLM used invoke_skill
+            // instead of combo mode), expand the combo here and execute inline.
+            tracing::info!(
+                skill = %skill_name,
+                "ActionExecNode: expanding invoke_skill as inline combo"
+            );
+            match ctx.skill_registry.expand_combo(skill_name, inputs) {
+                Some(combo_steps) => {
+                    let total = combo_steps.len();
+                    for (i, combo_step) in combo_steps.iter().enumerate() {
+                        if state.is_stopped() {
+                            return (false, "Stopped by user".into());
+                        }
+                        let sub_action = match parse_action_by_name(&combo_step.action, &combo_step.args) {
+                            Ok(a) => a,
+                            Err(e) => {
+                                tracing::warn!(combo_step = i, error = %e, "invoke_skill: failed to parse combo step — skipping");
+                                continue;
+                            }
+                        };
+                        match &sub_action {
+                            AgentAction::Wait { milliseconds } => {
+                                let flag = state.stop_flag.clone();
+                                let ms = *milliseconds;
+                                tokio::select! {
+                                    _ = tokio::time::sleep(std::time::Duration::from_millis(ms as u64)) => {}
+                                    _ = poll_stop(flag) => return (false, "Stopped by user".into()),
+                                }
+                            }
+                            AgentAction::Hotkey { keys } => {
+                                if let Err(e) = input::press_hotkey(keys.clone()).await {
+                                    tracing::warn!(error = %e, "invoke_skill: hotkey failed");
+                                }
+                            }
+                            AgentAction::KeyPress { key } => {
+                                if let Err(e) = input::press_hotkey(key.clone()).await {
+                                    tracing::warn!(error = %e, "invoke_skill: key_press failed");
+                                }
+                            }
+                            AgentAction::TypeText { text, clear_first } => {
+                                if *clear_first {
+                                    let _ = input::press_hotkey("ctrl+a".to_string()).await;
+                                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                                }
+                                if let Err(e) = input::type_text(text.clone(), *clear_first).await {
+                                    tracing::warn!(error = %e, "invoke_skill: type_text failed");
+                                }
+                            }
+                            other => {
+                                tracing::warn!(action = ?other, "invoke_skill: unsupported action in combo — skipping");
+                            }
+                        }
+                    }
+                    (true, format!("Skill '{}' executed ({} combo steps)", skill_name, total))
+                }
+                None => {
+                    tracing::warn!(skill = %skill_name, "invoke_skill: no combo found in registry");
+                    (false, format!("Skill '{}' not found in registry", skill_name))
+                }
+            }
+        }
         AgentAction::FinishTask { .. } | AgentAction::ReportFailure { .. } => {
             // Handled above in the node logic
             (true, String::new())
@@ -380,6 +442,7 @@ fn action_activity_label(action: &AgentAction) -> String {
             format!("正在执行命令: {preview}…")
         }
         AgentAction::Scroll { direction, .. } => format!("正在滚动({direction})…"),
+        AgentAction::InvokeSkill { skill_name, .. } => format!("正在执行技能: {skill_name}…"),
         AgentAction::FinishTask { .. } => "正在完成任务…".to_string(),
         AgentAction::ReportFailure { .. } => "正在报告结果…".to_string(),
         _ => "正在执行操作…".to_string(),

@@ -17,6 +17,7 @@ use crate::agent_engine::loop_control::LoopController;
 use crate::config::PerceptionConfig;
 use crate::llm::registry::ProviderRegistry;
 use crate::perception::yolo_detector::YoloDetector;
+use crate::skills::SkillRegistry;
 
 /// Immutable resource container passed to every node.
 pub struct NodeContext {
@@ -34,6 +35,11 @@ pub struct NodeContext {
     pub loop_ctrl: Arc<Mutex<LoopController>>,
     /// Session history writer (JSONL).
     pub history: Arc<Mutex<SessionHistory>>,
+    /// Skill registry with manifests (for Planner) and combos (for ComboExec).
+    pub skill_registry: Arc<SkillRegistry>,
+    /// Pre-computed skills context string to inject into planner prompts.
+    /// (Derived from `skill_registry.manifest_summary_for_planner()`)
+    pub skills_context: String,
 }
 
 impl NodeContext {
@@ -43,8 +49,10 @@ impl NodeContext {
         perception_cfg: PerceptionConfig,
         yolo_detector: Option<YoloDetector>,
         loop_ctrl: LoopController,
+        skill_registry: SkillRegistry,
     ) -> Self {
         let grid_n = perception_cfg.grid_n.clamp(4, 26);
+        let skills_context = skill_registry.manifest_summary_for_planner();
         Self {
             app,
             registry,
@@ -53,6 +61,8 @@ impl NodeContext {
             yolo_detector: Arc::new(Mutex::new(yolo_detector)),
             loop_ctrl: Arc::new(Mutex::new(loop_ctrl)),
             history: Arc::new(Mutex::new(SessionHistory::new())),
+            skill_registry: Arc::new(skill_registry),
+            skills_context,
         }
     }
 }

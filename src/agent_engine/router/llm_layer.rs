@@ -1,15 +1,17 @@
 //! L3: LLM fallback classification layer.
 //!
 //! Uses a lightweight model (the `routing` role in the provider registry)
-//! to classify the query. For simple routes, it also generates tool_calls
-//! in a single LLM call (two birds with one stone).
+//! to classify the query as Simple or Complex.
+//!
+//! **Single responsibility**: This layer ONLY classifies. Tool-call generation
+//! for Simple tasks is delegated to `SimpleExecNode`, keeping this prompt lean.
 
 use async_trait::async_trait;
 
 use crate::agent_engine::context::NodeContext;
 use crate::agent_engine::router::layer::{RouteResult, RouterLayer};
 use crate::agent_engine::state::RouteType;
-use crate::llm::types::{ChatMessage, FunctionCall, MessageContent, ToolCall};
+use crate::llm::types::{ChatMessage, MessageContent};
 
 const ROUTER_SYSTEM_PROMPT: &str = include_str!("../../../prompts/system/router.md");
 
@@ -39,7 +41,6 @@ impl RouterLayer for LlmLayer {
                     return Some(RouteResult {
                         route_type: RouteType::Complex,
                         confidence: 0.5,
-                        tool_calls: None,
                     });
                 }
             }
@@ -80,41 +81,14 @@ impl RouterLayer for LlmLayer {
                 match serde_json::from_str::<serde_json::Value>(json_str) {
                     Ok(v) => {
                         let route_type = match v["route_type"].as_str() {
+                            Some("chat") => RouteType::Chat,
                             Some("simple") => RouteType::Simple,
                             _ => RouteType::Complex,
-                        };
-
-                        // Extract tool_calls from the JSON body (NOT response.tool_calls,
-                        // because we used json_mode — tool_calls live inside the content).
-                        let tool_calls = if route_type == RouteType::Simple {
-                            v["tool_calls"]
-                                .as_array()
-                                .map(|arr| {
-                                    arr.iter()
-                                        .filter_map(|tc| {
-                                            let name = tc["name"].as_str()?;
-                                            let args = &tc["arguments"];
-                                            Some(ToolCall {
-                                                id: format!("router_{name}"),
-                                                call_type: "function".to_string(),
-                                                function: FunctionCall {
-                                                    name: name.to_string(),
-                                                    arguments: serde_json::to_string(args)
-                                                        .unwrap_or_else(|_| "{}".to_string()),
-                                                },
-                                            })
-                                        })
-                                        .collect::<Vec<_>>()
-                                })
-                                .filter(|v| !v.is_empty())
-                        } else {
-                            None
                         };
 
                         Some(RouteResult {
                             route_type,
                             confidence: v["confidence"].as_f64().unwrap_or(0.8) as f32,
-                            tool_calls,
                         })
                     }
                     Err(e) => {
@@ -122,7 +96,6 @@ impl RouterLayer for LlmLayer {
                         Some(RouteResult {
                             route_type: RouteType::Complex,
                             confidence: 0.5,
-                            tool_calls: None,
                         })
                     }
                 }
@@ -132,7 +105,6 @@ impl RouterLayer for LlmLayer {
                 Some(RouteResult {
                     route_type: RouteType::Complex,
                     confidence: 0.5,
-                    tool_calls: None,
                 })
             }
         }

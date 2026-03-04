@@ -4,17 +4,18 @@ use async_trait::async_trait;
 
 use crate::agent_engine::context::NodeContext;
 use crate::agent_engine::state::RouteType;
-use crate::llm::types::ToolCall;
 
 /// The result from a router layer classification attempt.
+///
+/// The Router is a **pure classifier** — it only determines `route_type`.
+/// Tool-call generation is the responsibility of `SimpleExecNode` (Simple path)
+/// or `PlannerNode` (Complex path).
 #[derive(Debug, Clone)]
 pub struct RouteResult {
     /// The classified route type.
     pub route_type: RouteType,
     /// Confidence score (0.0 – 1.0).
     pub confidence: f32,
-    /// For simple routes, the router may generate tool calls directly.
-    pub tool_calls: Option<Vec<ToolCall>>,
 }
 
 /// A single classification layer in the Router pipeline.

@@ -140,6 +140,12 @@ async fn agent_loop(
     // Build the graph once (topology is static)
     let graph = build_default_flow();
 
+    // Load skill registry (manifests + combos)
+    let skill_registry = {
+        crate::skills::manager::load_skill_registry("prompts/skills").await
+    };
+    tracing::info!(skills = skill_registry.skill_names().len(), "Skill registry loaded");
+
     // Build the node context (immutable resources)
     let ctx = NodeContext::new(
         app.clone(),
@@ -147,6 +153,7 @@ async fn agent_loop(
         perception_cfg,
         yolo_detector,
         LoopController::new(loop_config),
+        skill_registry,
     );
 
     // Goal buffered from a mid-task interruption (see forwarder logic below).

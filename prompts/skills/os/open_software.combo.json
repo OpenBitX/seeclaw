@@ -1,0 +1,12 @@
+{
+  "name": "open_software",
+  "params": ["software_name"],
+  "steps": [
+    { "action": "hotkey", "args": { "keys": "win+s" } },
+    { "action": "wait", "args": { "milliseconds": 300 } },
+    { "action": "type_text", "args": { "text": "{software_name}", "clear_first": true } },
+    { "action": "wait", "args": { "milliseconds": 500 } },
+    { "action": "key_press", "args": { "key": "enter" } },
+    { "action": "wait", "args": { "milliseconds": 1000 } }
+  ]
+}

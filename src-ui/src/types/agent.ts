@@ -65,6 +65,12 @@ export interface Message {
   screenshotBase64?: string;
   /** Grid size used when screenshotBase64 was captured */
   gridN?: number;
+  /** Task session ID — all messages from the same task share this ID */
+  taskId?: string;
+  /** Embedded TodoList steps (only on "plan" messages) */
+  todoSteps?: TodoStep[];
+  /** Whether the task plan is finalized (completed / failed / stopped) */
+  isTodoDone?: boolean;
 }
 
 export interface ViewportCapturedPayload {
@@ -88,4 +94,33 @@ export interface AgentStatePayload {
   summary?: string;
   /** Error message when state is 'error' */
   message?: string;
+}
+
+// ── TodoList types (from backend plan_task) ────────────────────────────────
+
+export type StepStatus = 'Pending' | 'InProgress' | 'Completed' | 'Failed' | 'Skipped';
+export type StepMode = 'Direct' | 'VisualLocate' | 'VisualAct';
+
+export interface TodoStep {
+  index: number;
+  description: string;
+  mode: StepMode;
+  status: StepStatus;
+}
+
+export interface TodoListPayload {
+  steps: TodoStep[];
+  total: number;
+  completed?: number;
+}
+
+export interface StepStartedPayload {
+  index: number;
+  description: string;
+  mode: StepMode;
+}
+
+export interface StepCompletedPayload {
+  index: number;
+  status: StepStatus;
 }

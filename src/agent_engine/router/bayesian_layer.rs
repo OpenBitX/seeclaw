@@ -86,7 +86,6 @@ impl RouterLayer for BayesianLayer {
         Some(RouteResult {
             route_type,
             confidence,
-            tool_calls: None,
         })
     }
 }

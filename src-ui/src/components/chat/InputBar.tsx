@@ -17,6 +17,7 @@ export const InputBar = observer(() => {
     if (!task || isRunning) return;
 
     setValue('');
+    agentStore.startNewTask();
     agentStore.addUserMessage(task);
     agentStore.setState('routing');
 

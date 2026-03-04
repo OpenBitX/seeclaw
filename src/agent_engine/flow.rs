@@ -14,10 +14,18 @@ use crate::agent_engine::state::RouteType;
 ///  │  router   │
 ///  └────┬──────┘
 ///       │ conditional: route_type
+///       ├─ Chat ────────────────────┐
+///       │                           ▼
+///       │                   ┌──────────────┐
+///       │                   │ simple_chat  │ ← lightweight LLM: no tools, just reply
+///       │                   └──────┬───────┘
+///       │                          ▼
+///       │                        (end)
+///       │
 ///       ├─ Simple ──────────────────┐
 ///       │                           ▼
 ///       │                   ┌──────────────┐
-///       │                   │  direct_exec  │ ← uses simple_tool_calls
+///       │                   │ simple_exec  │ ← lightweight LLM: 1 tool call
 ///       │                   └──────┬───────┘
 ///       │                          │
 ///       │                          ▼
@@ -35,18 +43,19 @@ use crate::agent_engine::state::RouteType;
 ///       └─ Complex ─────────┐
 ///                           ▼
 ///                    ┌──────────┐
-///                    │ planner  │ ← LLM generates todo_steps
+///                    │ planner  │ ← LLM generates todo_steps (sees skill manifests only)
 ///                    └────┬─────┘
 ///                         │
 ///                         ▼
 ///                  ┌──────────────┐
 ///                  │ step_dispatch │ ← routes by StepMode
 ///                  └──────┬───────┘
-///                         │
-///                    ┌────▼───────┐
-///                    │ action_exec │
-///                    └────┬───────┘
-///                         │
+///                    ┌────┤
+///                    │    ├─ Combo ──→ combo_exec → step_advance (zero LLM)
+///                    │    ├─ Direct → direct_exec → action_exec
+///                    │    ├─ VisualLocate → vlm_observe → action_exec
+///                    │    └─ VisualAct → vlm_act → action_exec
+///                    │
 ///                    step_advance
 ///                         │ conditional: more steps?
 ///                         ├─ step_dispatch (loop)
@@ -67,19 +76,32 @@ pub fn build_default_flow() -> Graph {
     // ── Router → conditional on route_type ──────────────────────────────
     graph.add_conditional_edge("router", |state| {
         match state.route_type {
-            RouteType::Simple => "direct_exec".to_string(),
+            RouteType::Chat => "simple_chat".to_string(),
+            RouteType::Simple => "simple_exec".to_string(),
             RouteType::Complex => "planner".to_string(),
         }
     });
+
+    // ── SimpleChatNode → end (always) ────────────────────────────────────
+    // SimpleChatNode always returns End — no outgoing edge needed.
+
+    // ── SimpleExec → action_exec ─────────────────────────────────────
+    // SimpleExecNode sets state.current_action and returns Continue.
+    // On failure it returns GoTo("planner") to escalate.
+    graph.add_edge("simple_exec", "action_exec");
 
     // ── Planner → step_dispatch (node itself returns GoTo or End) ───────
     // Planner returns End for FinishTask/ReportFailure, Continue otherwise.
     graph.add_edge("planner", "step_dispatch");
 
-    // ── StepDispatch → GoTo target (direct_exec / vlm_observe / vlm_act)
+    // ── StepDispatch → GoTo target (combo_exec / direct_exec / vlm_observe / vlm_act)
     // StepDispatchNode uses GoTo(), so no edge needed here — but we add a
     // fallback static edge just in case.
-    graph.add_edge("step_dispatch", "direct_exec");
+    graph.add_edge("step_dispatch", "combo_exec");
+
+    // ── ComboExec → step_advance (combo bypasses action_exec entirely) ──
+    // ComboExecNode uses GoTo("step_advance") on success, GoTo("vlm_act") on fallback.
+    graph.add_edge("combo_exec", "step_advance");
 
     // ── DirectExec → action_exec ────────────────────────────────────────
     graph.add_edge("direct_exec", "action_exec");

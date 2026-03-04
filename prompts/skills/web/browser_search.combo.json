@@ -1,0 +1,11 @@
+{
+  "name": "browser_search",
+  "params": ["query"],
+  "steps": [
+    { "action": "hotkey", "args": { "keys": "ctrl+l" } },
+    { "action": "wait", "args": { "milliseconds": 200 } },
+    { "action": "type_text", "args": { "text": "{query}", "clear_first": true } },
+    { "action": "key_press", "args": { "key": "enter" } },
+    { "action": "wait", "args": { "milliseconds": 2000 } }
+  ]
+}

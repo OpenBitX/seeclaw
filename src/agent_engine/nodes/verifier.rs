@@ -5,7 +5,6 @@
 //! - Fail → GoTo("planner") with failure context injected
 
 use async_trait::async_trait;
-use base64::Engine as _;
 use tauri::Emitter;
 
 use crate::agent_engine::context::NodeContext;
@@ -17,7 +16,7 @@ use crate::perception::screenshot::capture_primary;
 const VERIFIER_PROMPT: &str = include_str!("../../../prompts/system/verifier.md");
 
 /// Maximum number of replan cycles before giving up.
-const MAX_REPLAN_CYCLES: u32 = 3;
+const MAX_REPLAN_CYCLES: u32 = 2;
 
 pub struct VerifierNode;
 
@@ -62,8 +61,14 @@ impl Node for VerifierNode {
 
         // Capture final screenshot
         let shot = capture_primary().await.map_err(|e| e.to_string())?;
-        let b64 = base64::engine::general_purpose::STANDARD.encode(&shot.image_bytes);
-        let data_url = format!("data:image/png;base64,{b64}");
+        let b64 = &shot.image_base64;
+        let data_url = format!("data:image/jpeg;base64,{b64}");
+
+        // Show the verification screenshot to the user
+        let _ = ctx.app.emit("viewport_captured", serde_json::json!({
+            "image_base64": b64,
+            "source": "verifier",
+        }));
 
         // Build verification prompt
         let steps_summary = state.steps_log.join("\n");

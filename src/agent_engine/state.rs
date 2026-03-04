@@ -10,7 +10,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
-use crate::llm::types::{ChatMessage, ToolCall};
+use crate::llm::types::ChatMessage;
 use crate::perception::types::{ScreenshotMeta, UIElement};
 
 // ── Route type ─────────────────────────────────────────────────────────────
@@ -19,7 +19,11 @@ use crate::perception::types::{ScreenshotMeta, UIElement};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RouteType {
+    /// Pure conversation / greeting / knowledge Q&A — no tools or GUI needed.
+    Chat,
+    /// Single GUI action (open app, click button, etc.).
     Simple,
+    /// Multi-step workflow requiring planning.
     Complex,
 }
 
@@ -36,6 +40,8 @@ impl Default for RouteType {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum StepMode {
+    /// Pre-defined combo sequence from a skill — zero LLM, pure local execution.
+    Combo,
     /// Known UI path — Planner provides exact tool calls, no VLM needed.
     Direct,
     /// Need VLM to locate an element, but the action is predetermined.
@@ -46,7 +52,7 @@ pub enum StepMode {
 
 impl Default for StepMode {
     fn default() -> Self {
-        Self::Direct
+        Self::Combo
     }
 }
 
@@ -74,9 +80,15 @@ impl Default for StepStatus {
 pub struct TodoStep {
     pub index: usize,
     pub description: String,
-    /// Execution mode: direct / visual_locate / visual_act.
+    /// Execution mode: combo / direct / visual_locate / visual_act.
     #[serde(default)]
     pub mode: StepMode,
+    /// Skill name to invoke (e.g. "os/open_software"). Used by Combo mode.
+    #[serde(default)]
+    pub skill: Option<String>,
+    /// Parameters for the skill combo (e.g. {"software_name": "Edge"}).
+    #[serde(default)]
+    pub params: Option<serde_json::Value>,
     /// Pre-generated tool calls for `Direct` mode.
     #[serde(default)]
     pub tool_calls: Vec<ToolCallData>,
@@ -184,8 +196,6 @@ pub struct SharedState {
     // ── Routing ─────────────────────────────────────────────────────────
     /// Classification result from the Router pipeline.
     pub route_type: RouteType,
-    /// For simple routes, the Router (L3) may produce tool calls directly.
-    pub simple_tool_calls: Option<Vec<ToolCall>>,
 
     // ── Conversation / LLM context ──────────────────────────────────────
     /// The running conversation fed to the planner / LLM.
@@ -242,7 +252,6 @@ impl SharedState {
         Self {
             goal,
             route_type: RouteType::default(),
-            simple_tool_calls: None,
             conv_messages: Vec::new(),
             pending_tool_id: String::new(),
             todo_steps: Vec::new(),

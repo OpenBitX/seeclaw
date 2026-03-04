@@ -18,6 +18,9 @@ import type {
   AgentStatePayload,
   ApprovalRequest,
   ViewportCapturedPayload,
+  TodoListPayload,
+  StepStartedPayload,
+  StepCompletedPayload,
 } from './types/agent';
 
 // ── Window controls ───────────────────────────────────────────────────────────
@@ -92,7 +95,8 @@ const AppInner = observer(() => {
     agentStore.setState(payload.state, terminalMessage);
     // Pre-open an assistant message bubble for states that will stream LLM content,
     // so the "thinking" indicator appears immediately without waiting for the first chunk.
-    if (payload.state === 'planning' || payload.state === 'evaluating') {
+    // Note: "planning" is excluded because the planner LLM runs silently (reasoning is internal).
+    if (payload.state === 'evaluating') {
       agentStore.startAssistantMessage();
     }
   }, []);
@@ -117,6 +121,22 @@ const AppInner = observer(() => {
     agentStore.setActivity(payload.text);
   }, []);
   useTauriEvent<{ text: string }>('agent_activity', handleActivity);
+
+  /** TodoList events from planner / step engine */
+  const handleTodoList = useCallback((payload: TodoListPayload) => {
+    agentStore.setTodoList(payload);
+  }, []);
+  useTauriEvent<TodoListPayload>('todolist_updated', handleTodoList);
+
+  const handleStepStarted = useCallback((payload: StepStartedPayload) => {
+    agentStore.setCurrentStep(payload);
+  }, []);
+  useTauriEvent<StepStartedPayload>('step_started', handleStepStarted);
+
+  const handleStepCompleted = useCallback((payload: StepCompletedPayload) => {
+    agentStore.completeStep(payload);
+  }, []);
+  useTauriEvent<StepCompletedPayload>('step_completed', handleStepCompleted);
 
   // Sync MobX immediately when Rust broadcasts config_updated after save
   const handleConfigUpdated = useCallback((raw: Record<string, unknown>) => {

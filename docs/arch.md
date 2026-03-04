@@ -2,76 +2,100 @@
 
 ## 核心拓扑
 
+实际代码图结构（对应 `src/agent_engine/graph.rs`）：
+
 ```
 User Query
     │
     ▼
-┌──────────────────────────────────────┐
-│              ROUTER                   │
-│  L1: Regex 关键词匹配                 │
-│  L2: Bayesian 概率分类                │
-│  L3: LLM 兜底 (轻量模型)             │
-│                                      │
-│  输出: route_type + context          │
-│  当前: simple | complex              │
-│  可扩展: creative | research | ...   │
-└──────────┬───────────────────────────┘
-           │
+┌─────────────────────────────────────────┐
+│                ROUTER                    │
+│  L1: Regex 关键词匹配                    │
+│  L2: Bayesian 概率分类                   │
+│  L3: LLM 兜底 (轻量模型, stream=false)  │
+│                                         │
+│  输出: route_type (+ simple_tool_calls) │
+│  当前: Simple | Complex                 │
+└──────────┬──────────────────────────────┘
+           │ conditional: route_type
     ┌──────┴──────┐
     │             │
- simple        complex
+ Simple        Complex
     │             │
     ▼             ▼
-┌────────┐   ┌──────────────────────────────────┐
-│ Router  │   │           PLANNER                 │
-│ 直接生成│   │  独立 prompt: planner.md           │
-│ tool    │   │  按需加载 skills (by category)     │
-│ calls   │   │  输出: TodoList (带步骤类型)       │
-└───┬────┘   └──────────────┬───────────────────┘
-    │                       │
-    ▼                       ▼
-┌────────┐          ┌──────────────┐
-│Executor│          │   TodoList   │──→ 前端 UI (pinned, 可编辑)
-│ 执行   │          └──────┬───────┘
-└───┬────┘                 │
-    │              for each step:
-    ▼                      │
-  Done            ┌────────┴────────┐────────────────┐
-                  │                 │                 │
-            ┌─────▼─────┐   ┌──────▼──────┐   ┌─────▼──────┐
-            │  direct    │   │visual_locate│   │ visual_act │
-            │  盲执行     │   │ VLM 观察    │   │ VLM 自主   │
-            └─────┬─────┘   └──────┬──────┘   └─────┬──────┘
-                  │                │                 │
-                  │                ▼                 ▼
-                  │         ┌───────────┐    ┌────────────┐
-                  │         │VLM observe│    │ VLM act    │
-                  │         │返回定位数据│    │ 理解+决策   │
-                  │         └─────┬─────┘    │ +生成tools │
-                  │               │          │ +直接执行   │
-                  │               ▼          └─────┬──────┘
-                  │         ┌──────────┐           │
-                  │         │ Executor │           │
-                  │         │ 执行动作  │           │
-                  │         └────┬─────┘           │
-                  │              │                 │
-                  └──────┬───────┘─────────────────┘
-                         │
-                         ▼
-                  ┌─────────────┐
-                  │ 最后一步？    │
-                  └──────┬──────┘
-                    Yes  │  No → 下一步 (loop)
-                         ▼
-                  ┌──────────────┐
-                  │   VERIFIER   │
-                  │ 截图 + 目标  │
-                  │ 比对验证     │
-                  └──────┬──────┘
-                    pass │  fail → 回到 Planner 重新规划
-                         ▼
-                       Done
+┌────────────┐  ┌─────────────────────────────────────┐
+│ direct_exec │  │              planner                 │
+│ 执行 Router │  │  独立 prompt: planner.md             │
+│ 预生成的    │  │  按需加载 skills (by category)        │
+│ tool calls  │  │  输出: TodoList (带步骤类型)          │
+└─────┬──────┘  └───────────────┬────────────────────┘
+      │                         │ (fallback edge)
+      │                         ▼
+      │                ┌────────────────┐
+      │                │ step_dispatch  │
+      │                │ 按 StepMode 分发│
+      │                └───┬────────────┘
+      │                    │ GoTo:
+      │         ┌──────────┼──────────────┐
+      │         │          │              │
+      │    [Direct]  [VisualLocate]  [VisualAct]
+      │         │          │              │
+      │         │          ▼              ▼
+      │         │   ┌────────────┐  ┌──────────┐
+      │         │   │ vlm_observe│  │ vlm_act  │
+      │         │   │ 截图+定位  │  │ 截图+决策│
+      │         │   └─────┬──────┘  └────┬─────┘
+      │         │         │              │
+      └─────────▼─────────▼──────────────▼
+                     ┌────────────┐
+                     │ action_exec │
+                     │ 执行原子动作 │
+                     └──────┬──────┘
+                            │ conditional:
+               ┌────────────┼───────────────┬──────────────┐
+               │            │               │              │
+        needs_approval  needs_stability  todo_steps    else
+               │            │            is_empty()       │
+               ▼            ▼               │             ▼
+        ┌───────────┐ ┌──────────┐          │       ┌────────────┐
+        │user_confirm│ │stability │          │       │step_advance│
+        │ 等待用户   │ │等待画面  │          │       │ 推进步骤索引│
+        │ 确认高危  │ │  稳定    │          │       └──────┬─────┘
+        └─────┬─────┘ └────┬─────┘          │             │ conditional:
+              │             │               │      ┌───────┴───────┐
+              ▼             ▼               │  更多步骤?        全部完成
+          action_exec  step_advance         │      │               │
+                                            │      ▼               ▼
+                                            │  step_dispatch   verifier
+                                            │  (循环)           截图+比对
+                                            │                   │ GoTo:
+                                            │             ┌─────┴────┐
+                                            │           pass       fail
+                                            │             │         │
+                                            └─────────────▼    planner
+                                                     summarizer  (重规划)
+                                                     生成人类可读  ↑
+                                                     最终回复      └── cycle_count++
+                                                          │
+                                                         End
 ```
+
+### 节点清单
+
+| 节点 | 文件 | UI State | 说明 |
+|------|------|----------|------|
+| `router` | `nodes/router.rs` | `routing` | 3层路由分类器 |
+| `planner` | `nodes/planner.rs` | `planning` | 生成 TodoList |
+| `step_dispatch` | `nodes/step_dispatch.rs` | `executing` | 按 StepMode 分发到子节点 |
+| `direct_exec` | `nodes/direct_exec.rs` | `executing` | 执行 Planner 预生成的 tool calls |
+| `vlm_observe` | `nodes/vlm_observe.rs` | `observing` | 截图+VLM 定位元素 |
+| `vlm_act` | `nodes/vlm_act.rs` | `observing` | 截图+VLM 理解+生成 tool calls |
+| `action_exec` | `nodes/action_exec.rs` | `executing` | 执行单个原子动作 |
+| `user_confirm` | `nodes/user_confirm.rs` | `waiting_for_user` | 等待用户确认高危操作 |
+| `stability` | `nodes/stability.rs` | `executing` | 等待画面稳定后继续 |
+| `step_advance` | `nodes/step_advance.rs` | `executing` | 推进步骤索引，检查是否全部完成 |
+| `verifier` | `nodes/verifier.rs` | `evaluating` | 截图比对目标，pass/fail |
+| `summarizer` | `nodes/summarizer.rs` | `evaluating` | VisualDecisionPipeline 决策是否截图，LLM 生成最终回复 |
 
 ## 三种步骤执行模式
 
@@ -122,6 +146,33 @@ Query ──→ L1: Regex ──match──→ route_type
 - L3 LLM: 用小模型做分类，simple 路由时同时生成 tool calls（一次调用两件事）
 - 路由类型可扩展: 当前 `simple | complex`，未来可加 `creative | research | ...`
 
+## Summarizer VisualDecisionPipeline
+
+Summarizer 在生成最终回复前，先通过 3 层管道决定是否需要截图：
+
+```
+goal + steps_log + todo_steps
+    │
+    ▼
+L1: VisualRegexLayer    ──match──→ VisualDecisionResult { needs_visual, confidence }
+    │
+    no match
+    ▼
+L2: VisualBayesianLayer ──confidence > θ──→ VisualDecisionResult
+    │
+    low confidence
+    ▼
+L3: VisualLlmLayer      ──→ VisualDecisionResult (always returns Some)
+    │
+    all abstain (fallback)
+    ▼
+needs_visual = false
+```
+
+- 位于 `nodes/visual_router/` 模块，与 Router 管道设计对称
+- `needs_visual=true` 时 Summarizer 截图并调用视觉模型生成回复
+- `needs_visual=false` 时直接用文本上下文生成回复，节省 token
+
 ## Prompt 组织
 
 ```
@@ -132,7 +183,9 @@ prompts/
 │   ├── executor.md          # Executor prompt (极简, 仅工具执行上下文)
 │   ├── vlm_observe.md       # VLM 观察模式 (元素定位, 状态报告)
 │   ├── vlm_act.md           # VLM 自主模式 (理解 + 决策 + 生成 tool calls)
-│   └── verifier.md          # 最终验证 prompt (截图 vs 目标比对)
+│   ├── verifier.md          # 最终验证 prompt (截图 vs 目标比对)
+│   ├── summarizer.md        # Summarizer prompt (生成人类可读最终回复)
+│   └── visual_router.md     # VisualDecisionPipeline L3 LLM 层 prompt
 ├── skills/                  # 按领域分类, Planner 按需加载
 │   ├── os/
 │   │   ├── open_software.md
@@ -257,6 +310,8 @@ Backend                              Frontend
 | VLM Observe | `vlm_observe.md` | 截图, target 描述 | 元素坐标/页面状态 | 无 |
 | VLM Act | `vlm_act.md` | 截图, 子目标, vlm_act_tools | tool_calls 序列 | vlm 专属 |
 | Verifier | `verifier.md` | 截图, 原始目标 | pass/fail + 原因 | 无 |
+| Summarizer | `summarizer.md` | goal, steps_log, 可选截图 | 人类可读最终回复 | 无 |
+| VisualRouter L3 | `visual_router.md` | goal, steps_log, todo_steps | needs_visual + confidence | 无 |
 
 ## 关键设计原则
 

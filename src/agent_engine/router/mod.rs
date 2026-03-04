@@ -81,7 +81,6 @@ impl RouterPipeline {
         RouteResult {
             route_type: RouteType::Complex,
             confidence: 0.0,
-            tool_calls: None,
         }
     }
 }

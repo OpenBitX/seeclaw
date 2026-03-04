@@ -19,6 +19,17 @@ pub struct RegexLayer {
 impl RegexLayer {
     pub fn new() -> Self {
         let rules = vec![
+            // ── Chat patterns: greetings, knowledge Q&A, casual conversation ──
+            // These require NO tools or GUI operations at all.
+            (Regex::new(r"(?i)^(你好|hello|hi|hey|嗨|哈喽|早上好|晚上好|下午好|good\s*(morning|afternoon|evening)|早安|晚安)[!！。.~～\s]*$").unwrap(), RouteType::Chat),
+            (Regex::new(r"(?i)^(你是谁|who\s+are\s+you|你叫什么|what('s| is) your name)[?？!！。.]*$").unwrap(), RouteType::Chat),
+            (Regex::new(r"(?i)^(谢谢|thanks|thank\s+you|多谢|感谢)[!！。.~～\s]*$").unwrap(), RouteType::Chat),
+            (Regex::new(r"(?i)^(再见|bye|goodbye|拜拜|see\s+you)[!！。.~～\s]*$").unwrap(), RouteType::Chat),
+            // Simple math / factual lookups (no GUI needed)
+            (Regex::new(r"(?i)^\d+\s*[\+\-\*\/×÷]\s*\d+\s*(等于几|等于多少|=\s*\?|[?？])\s*$").unwrap(), RouteType::Chat),
+            // "你会什么" / "你能做什么" / "what can you do"
+            (Regex::new(r"(?i)^(你会什么|你能做什么|你有什么(技能|功能|能力)|what\s+can\s+you\s+do)[?？!！。.]*$").unwrap(), RouteType::Chat),
+
             // ── Simple patterns: single direct actions ──
             // IMPORTANT: Chinese has no spaces so \S+ matches entire sentences.
             // We restrict target length (≤8 CJK chars) to avoid mis-classifying
@@ -61,7 +72,6 @@ impl RouterLayer for RegexLayer {
                 return Some(RouteResult {
                     route_type: route_type.clone(),
                     confidence: 1.0,
-                    tool_calls: None,
                 });
             }
         }

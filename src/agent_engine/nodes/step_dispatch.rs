@@ -64,6 +64,7 @@ impl Node for StepDispatchNode {
         }
 
         let target = match step.mode {
+            StepMode::Combo => "combo_exec",
             StepMode::Direct => "direct_exec",
             StepMode::VisualLocate => "vlm_observe",
             StepMode::VisualAct => "vlm_act",
