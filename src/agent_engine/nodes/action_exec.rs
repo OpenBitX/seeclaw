@@ -44,10 +44,10 @@ impl Node for ActionExecNode {
         let action = match state.current_action.take() {
             Some(a) => a,
             None => {
-                // This should not happen in normal flow (direct_exec now falls back to planner).
+                // This should not happen in normal flow.
                 // Guard here so a logic bug silently skips rather than crashing the whole graph.
-                tracing::warn!("ActionExecNode: no current_action set — skipping to step_advance");
-                return Ok(NodeOutput::GoTo("step_advance".to_string()));
+                tracing::warn!("ActionExecNode: no current_action set — skipping to step_evaluate");
+                return Ok(NodeOutput::GoTo("step_evaluate".to_string()));
             }
         };
 
@@ -112,6 +112,24 @@ impl Node for ActionExecNode {
             tool_calls: None,
         });
 
+        // Store result for loop agents (ChatAgent / VlmAgent)
+        state.last_exec_result = msg.clone();
+
+        // Track action outcome for auto-completion heuristics (StepEvaluate)
+        state.last_action_succeeded = ok;
+        state.last_action_kind = action_kind_tag(&action).to_string();
+
+        // Append to step action history (used by VLM to avoid repeating actions)
+        {
+            let label = compact_action_label(&action);
+            let history_entry = if ok {
+                format!("iter {}: {} → {}", state.step_iterations, label, truncate_str(&msg, 60))
+            } else {
+                format!("iter {}: {} → FAILED: {}", state.step_iterations, label, truncate_str(&msg, 60))
+            };
+            state.step_action_history.push(history_entry);
+        }
+
         // Record in history
         {
             let mut history = ctx.history.lock().await;
@@ -145,6 +163,7 @@ impl Node for ActionExecNode {
         // Determine if stability wait is needed
         state.needs_stability = needs_stability_wait(&action) && ok;
 
+        // Route to step_evaluate for loop control (replaces direct step_advance routing)
         Ok(NodeOutput::Continue)
     }
 }
@@ -449,4 +468,54 @@ fn action_activity_label(action: &AgentAction) -> String {
     }
 }
 
+/// Compact human-readable action label for step_action_history.
+fn compact_action_label(action: &AgentAction) -> String {
+    match action {
+        AgentAction::MouseClick { element_id } => format!("click({})", element_id),
+        AgentAction::MouseDoubleClick { element_id } => format!("dblclick({})", element_id),
+        AgentAction::MouseRightClick { element_id } => format!("rclick({})", element_id),
+        AgentAction::Hotkey { keys } => format!("hotkey({})", keys),
+        AgentAction::KeyPress { key } => format!("key({})", key),
+        AgentAction::TypeText { text, .. } => {
+            let preview: String = text.chars().take(20).collect();
+            format!("type(\"{}\")", preview)
+        }
+        AgentAction::ExecuteTerminal { command, .. } => {
+            let preview: String = command.chars().take(30).collect();
+            format!("exec(\"{}\")", preview)
+        }
+        AgentAction::Scroll { direction, .. } => format!("scroll({})", direction),
+        AgentAction::Wait { milliseconds } => format!("wait({}ms)", milliseconds),
+        AgentAction::InvokeSkill { skill_name, .. } => format!("skill({})", skill_name),
+        _ => "other".to_string(),
+    }
+}
 
+/// Truncate a string for log display.
+fn truncate_str(s: &str, max: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() > max {
+        format!("{}…", chars[..max].iter().collect::<String>())
+    } else {
+        s.to_string()
+    }
+}
+
+/// Return a short tag identifying the action kind (for auto-completion heuristics).
+fn action_kind_tag(action: &AgentAction) -> &'static str {
+    match action {
+        AgentAction::MouseClick { .. } => "mouse_click",
+        AgentAction::MouseDoubleClick { .. } => "mouse_double_click",
+        AgentAction::MouseRightClick { .. } => "mouse_right_click",
+        AgentAction::Hotkey { .. } => "hotkey",
+        AgentAction::KeyPress { .. } => "key_press",
+        AgentAction::TypeText { .. } => "type_text",
+        AgentAction::ExecuteTerminal { .. } => "execute_terminal",
+        AgentAction::Scroll { .. } => "scroll",
+        AgentAction::Wait { .. } => "wait",
+        AgentAction::InvokeSkill { .. } => "invoke_skill",
+        AgentAction::FinishTask { .. } => "finish_task",
+        AgentAction::ReportFailure { .. } => "report_failure",
+        _ => "other",
+    }
+}

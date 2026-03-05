@@ -110,6 +110,16 @@ impl Node for VerifierNode {
             return Ok(NodeOutput::End);
         }
 
+        // ── Log VLM response (truncated) ────────────────────────────────
+        {
+            let content_preview = truncate(response.content.trim(), 100);
+            tracing::info!(
+                content = %content_preview,
+                "[Verifier] response: '{}'",
+                content_preview
+            );
+        }
+
         // Parse verification result
         let raw = response.content.trim();
         let json_str = raw
@@ -166,6 +176,16 @@ impl Node for VerifierNode {
 
             Ok(NodeOutput::GoTo("planner".to_string()))
         }
+    }
+}
+
+/// Truncate to `max` chars with "…" if longer (for log display).
+fn truncate(s: &str, max: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() > max {
+        format!("{}…", chars[..max].iter().collect::<String>())
+    } else {
+        s.to_string()
     }
 }
 

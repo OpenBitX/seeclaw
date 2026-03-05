@@ -76,10 +76,12 @@ impl RouterPipeline {
             }
         }
 
-        // No layer could classify — default to Complex
-        tracing::info!("all router layers returned None — defaulting to Complex");
+        // No layer could classify — default to Chat (safe fallback).
+        // Previously defaulted to Complex, which caused greetings to trigger
+        // the planner + screenshot pipeline when the LLM layer failed.
+        tracing::info!("all router layers returned None — defaulting to Chat");
         RouteResult {
-            route_type: RouteType::Complex,
+            route_type: RouteType::Chat,
             confidence: 0.0,
         }
     }

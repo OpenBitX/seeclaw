@@ -11,7 +11,7 @@ use tauri::Emitter;
 
 use crate::agent_engine::context::NodeContext;
 use crate::agent_engine::node::{poll_stop, Node, NodeOutput};
-use crate::agent_engine::state::{AgentAction, GraphResult, SharedState};
+use crate::agent_engine::state::{AgentAction, GraphResult, RouteType, SharedState};
 use crate::agent_engine::tool_parser::parse_tool_call_to_action;
 use crate::llm::tools::load_builtin_tools;
 use crate::llm::types::{ChatMessage, ContentPart, ImageUrl, MessageContent, StreamChunk, StreamChunkKind};
@@ -55,33 +55,44 @@ impl Node for PlannerNode {
                 format!("{}\n\n{}", PLANNER_SYSTEM, ctx.skills_context)
             };
 
-            // Capture an initial screenshot so the planner can see the current
-            // screen state and make better-informed plans for GUI tasks.
-            let user_content = match capture_primary().await {
-                Ok(shot) => {
-                    tracing::info!("PlannerNode: initial screenshot captured for planning context");
-                    // Show the screenshot to the user
-                    let _ = ctx.app.emit("viewport_captured", serde_json::json!({
-                        "image_base64": &shot.image_base64,
-                        "source": "planner_initial",
-                    }));
-                    let _ = ctx.app.emit("agent_activity", serde_json::json!({
-                        "text": "已截取当前屏幕，正在结合画面制定计划…"
-                    }));
-                    let data_url = format!("data:image/jpeg;base64,{}", shot.image_base64);
-                    MessageContent::Parts(vec![
-                        ContentPart::ImageUrl {
-                            image_url: ImageUrl { url: data_url },
-                        },
-                        ContentPart::Text {
-                            text: state.goal.clone(),
-                        },
-                    ])
+            // Only capture an initial screenshot when the route is ComplexVisual.
+            // For plain Complex tasks (e.g. terminal commands, file operations)
+            // the screenshot is unnecessary and can even confuse the planner by
+            // showing the SeeClaw UI itself.
+            let needs_visual = state.route_type == RouteType::ComplexVisual;
+
+            let user_content = if needs_visual {
+                match capture_primary().await {
+                    Ok(shot) => {
+                        tracing::info!("PlannerNode: initial screenshot captured for planning context (ComplexVisual)");
+                        let _ = ctx.app.emit("viewport_captured", serde_json::json!({
+                            "image_base64": &shot.image_base64,
+                            "source": "planner_initial",
+                        }));
+                        let _ = ctx.app.emit("agent_activity", serde_json::json!({
+                            "text": "已截取当前屏幕，正在结合画面制定计划…"
+                        }));
+                        let data_url = format!("data:image/jpeg;base64,{}", shot.image_base64);
+                        MessageContent::Parts(vec![
+                            ContentPart::ImageUrl {
+                                image_url: ImageUrl { url: data_url },
+                            },
+                            ContentPart::Text {
+                                text: state.goal.clone(),
+                            },
+                        ])
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "PlannerNode: screenshot failed, falling back to text-only planning");
+                        MessageContent::Text(state.goal.clone())
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!(error = %e, "PlannerNode: initial screenshot failed, planning without visual context");
-                    MessageContent::Text(state.goal.clone())
-                }
+            } else {
+                tracing::info!("PlannerNode: Complex route — skipping initial screenshot");
+                let _ = ctx.app.emit("agent_activity", serde_json::json!({
+                    "text": "正在制定任务计划…"
+                }));
+                MessageContent::Text(state.goal.clone())
             };
 
             state.conv_messages = vec![
@@ -126,6 +137,18 @@ impl Node for PlannerNode {
             return Ok(NodeOutput::End);
         }
 
+        // ── Log LLM response (truncated) ────────────────────────────────
+        {
+            let tool_name = response.tool_calls.first().map(|tc| tc.function.name.as_str()).unwrap_or("(none)");
+            let content_preview = truncate(response.content.trim(), 100);
+            tracing::info!(
+                tool = tool_name,
+                content = %content_preview,
+                "[Planner] response: tool={} content='{}'",
+                tool_name, content_preview
+            );
+        }
+
         // Process tool call
         if let Some(tc) = response.tool_calls.into_iter().next() {
             // Append assistant message
@@ -138,11 +161,21 @@ impl Node for PlannerNode {
             state.pending_tool_id = tc.id.clone();
 
             match parse_tool_call_to_action(&tc) {
-                Ok(AgentAction::PlanTask { ref steps }) => {
+                Ok(AgentAction::PlanTask {
+                    ref final_goal,
+                    ref plan_summary,
+                    ref steps,
+                }) => {
+                    state.final_goal = final_goal.clone();
+                    state.plan_summary = plan_summary.clone();
                     state.todo_steps = steps.clone();
                     state.current_step_idx = 0;
                     state.steps_log.clear();
-                    tracing::info!(steps = steps.len(), "PlannerNode: todo list created");
+                    tracing::info!(
+                        steps = steps.len(),
+                        final_goal = %final_goal,
+                        "PlannerNode: plan created"
+                    );
 
                     // Ack the plan_task tool call
                     state.conv_messages.push(ChatMessage {
@@ -200,7 +233,7 @@ impl Node for PlannerNode {
                 }
                 Err(e) => {
                     // Unknown tool — inject error feedback for self-correction
-                    tracing::warn!(error = %e, tool = %tc.function.name, "PlannerNode: unrecognised tool");
+                    tracing::warn!(error = %e, tool = %tc.function.name, "[Planner] unrecognised tool");
                     state.conv_messages.push(ChatMessage {
                         role: "tool".into(),
                         content: MessageContent::Text(format!(
@@ -216,11 +249,21 @@ impl Node for PlannerNode {
             }
         } else {
             // Content-only response — treat as done
-            tracing::info!("PlannerNode: content-only response → done");
+            tracing::info!("[Planner] content-only response → done");
             state.result = Some(GraphResult::Done {
                 summary: response.content,
             });
             Ok(NodeOutput::End)
         }
+    }
+}
+
+/// Truncate to `max` chars with "…" if longer (for log display).
+fn truncate(s: &str, max: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() > max {
+        format!("{}…", chars[..max].iter().collect::<String>())
+    } else {
+        s.to_string()
     }
 }

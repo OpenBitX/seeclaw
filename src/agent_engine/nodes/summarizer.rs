@@ -159,6 +159,18 @@ impl Node for SummarizerNode {
 
         let summary = response.content.trim().to_string();
 
+        // ── Log LLM/VLM response (truncated) ────────────────────────────────
+        {
+            let content_preview = truncate(&summary, 100);
+            tracing::info!(
+                needs_visual,
+                content_len = summary.len(),
+                content = %content_preview,
+                "[Summarizer] response (visual={}): '{}'",
+                needs_visual, content_preview
+            );
+        }
+
         // Emit Done to close the stream on the frontend
         let _ = ctx.app.emit(
             "llm_stream_chunk",
@@ -170,5 +182,15 @@ impl Node for SummarizerNode {
 
         state.result = Some(GraphResult::Done { summary });
         Ok(NodeOutput::End)
+    }
+}
+
+/// Truncate to `max` chars with "…" if longer (for log display).
+fn truncate(s: &str, max: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() > max {
+        format!("{}…", chars[..max].iter().collect::<String>())
+    } else {
+        s.to_string()
     }
 }

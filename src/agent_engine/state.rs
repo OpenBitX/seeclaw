@@ -23,42 +23,44 @@ pub enum RouteType {
     Chat,
     /// Single GUI action (open app, click button, etc.).
     Simple,
-    /// Multi-step workflow requiring planning.
+    /// Multi-step workflow requiring planning (no initial screenshot).
     Complex,
+    /// Multi-step workflow that *needs* the current screen to plan.
+    /// Planner captures a screenshot before generating the todo list.
+    ComplexVisual,
 }
 
 impl Default for RouteType {
     fn default() -> Self {
-        Self::Complex
+        Self::Chat
     }
 }
 
 // ── Step mode & status ─────────────────────────────────────────────────────
 
-/// Execution mode for a single step in the TodoList.
-/// Assigned by the Planner and consumed by StepDispatch.
+/// Execution mode for a step. StepRouter selects the actual mode at runtime;
+/// Planner only provides a `recommended_mode` hint.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum StepMode {
     /// Pre-defined combo sequence from a skill — zero LLM, pure local execution.
     Combo,
-    /// Known UI path — Planner provides exact tool calls, no VLM needed.
-    Direct,
-    /// Need VLM to locate an element, but the action is predetermined.
-    VisualLocate,
-    /// Complex visual task — VLM understands context and generates tool calls.
-    VisualAct,
+    /// LLM-driven loop: terminal commands, keyboard shortcuts, file ops — no vision.
+    Chat,
+    /// VLM-driven loop: screenshot → VLM → action → screenshot verify.
+    Vlm,
 }
 
 impl Default for StepMode {
     fn default() -> Self {
-        Self::Combo
+        Self::Chat
     }
 }
 
 /// Lifecycle status of a single TodoStep.
+/// NOTE: No serde rename — variant names serialize as-is (PascalCase) to match
+/// the TypeScript StepStatus type ('Pending' | 'InProgress' | 'Completed' | ...).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
 pub enum StepStatus {
     Pending,
     InProgress,
@@ -75,35 +77,40 @@ impl Default for StepStatus {
 
 // ── TodoStep ───────────────────────────────────────────────────────────────
 
-/// A single step in the planner's TodoList (aligned with arch.md design).
+/// A single step in the planner's TodoList.
+///
+/// The Planner outputs high-level sub-goals with recommendations.
+/// Execution details (tool_calls, actions) are decided at runtime by
+/// the loop agents (ChatAgent / VlmAgent / ComboExec).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TodoStep {
     pub index: usize,
+    /// High-level description of what this step should achieve.
     pub description: String,
-    /// Execution mode: combo / direct / visual_locate / visual_act.
+    /// Planner's recommended execution mode (hint, not binding).
+    #[serde(default)]
+    pub recommended_mode: StepMode,
+    /// The actual mode selected by StepRouter at runtime.
     #[serde(default)]
     pub mode: StepMode,
-    /// Skill name to invoke (e.g. "os/open_software"). Used by Combo mode.
+    /// Skills that MUST be followed for this step (Planner-assigned).
+    #[serde(default)]
+    pub required_skills: Vec<String>,
+    /// Planner's guidance/instructions for the loop agent executing this step.
+    #[serde(default)]
+    pub guidance: Option<String>,
+    /// Skill name for combo mode (e.g. "open_software").
     #[serde(default)]
     pub skill: Option<String>,
     /// Parameters for the skill combo (e.g. {"software_name": "Edge"}).
     #[serde(default)]
     pub params: Option<serde_json::Value>,
-    /// Pre-generated tool calls for `Direct` mode.
-    #[serde(default)]
-    pub tool_calls: Vec<ToolCallData>,
-    /// Element description for VLM to locate (`VisualLocate` mode).
-    pub target: Option<String>,
-    /// Action template to execute after VLM locates element (`VisualLocate`).
-    pub action_template: Option<AgentAction>,
-    /// Sub-goal description for VLM autonomous mode (`VisualAct`).
-    pub vlm_goal: Option<String>,
     /// Current lifecycle status.
     #[serde(default)]
     pub status: StepStatus,
 }
 
-/// Lightweight tool call data embedded in a TodoStep.
+/// Lightweight tool call data used internally by agents.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCallData {
     pub name: String,
@@ -130,8 +137,12 @@ pub enum AgentAction {
     Wait { milliseconds: u32 },
     FinishTask { summary: String },
     ReportFailure { reason: String, last_attempted_action: Option<String> },
-    /// Planner produces a structured todo list (used only during parse).
-    PlanTask { steps: Vec<TodoStep> },
+    /// Planner produces a structured plan (used only during parse).
+    PlanTask {
+        final_goal: String,
+        plan_summary: String,
+        steps: Vec<TodoStep>,
+    },
 }
 
 // ── ActionResult ───────────────────────────────────────────────────────────
@@ -203,6 +214,12 @@ pub struct SharedState {
     /// Tool-call ID of the most recent pending tool call (for tool-result ack).
     pub pending_tool_id: String,
 
+    // ── Plan context (from Planner) ─────────────────────────────────────
+    /// Planner's summary of the overall plan (injected into loop agent context).
+    pub plan_summary: String,
+    /// Planner's restatement of the user's final goal (for loop agents).
+    pub final_goal: String,
+
     // ── TodoList ────────────────────────────────────────────────────────
     /// Steps generated by the Planner.
     pub todo_steps: Vec<TodoStep>,
@@ -220,6 +237,28 @@ pub struct SharedState {
     /// Cleared by `ActionExecNode` once it consumes the approval and proceeds.
     /// This prevents `action_exec` from re-routing to `user_confirm` in a loop.
     pub action_user_approved: bool,
+
+    // ── Dynamic loop control ────────────────────────────────────────────
+    /// Current loop mode for the active step (set by StepRouter).
+    pub current_loop_mode: StepMode,
+    /// Set by loop agents when they want to switch execution mode.
+    pub mode_switch_requested: Option<StepMode>,
+    /// Set by loop agents when the current sub-goal is complete.
+    pub step_complete: bool,
+    /// The last execution result text (for StepEvaluate context).
+    pub last_exec_result: String,
+    /// Per-step conversation for loop agents (reset each step).
+    pub step_messages: Vec<ChatMessage>,
+    /// Unified iteration counter for the current step (incremented by chat_agent AND vlm_act).
+    /// StepRouter resets this to 0 on each new step. StepEvaluate uses it for max-iter guard.
+    pub step_iterations: u32,
+    /// Brief action history for the current step ("iter 1: hotkey win+d", "iter 2: mouse_click UI_10").
+    /// Used by VLM to avoid repeating the same action and to know when to call finish_step.
+    pub step_action_history: Vec<String>,
+    /// Whether the last action executed successfully (set by ActionExecNode).
+    pub last_action_succeeded: bool,
+    /// Kind of the last action executed (e.g. "mouse_click", "type_text"). For auto-completion heuristics.
+    pub last_action_kind: String,
 
     // ── Perception ──────────────────────────────────────────────────────
     /// Most recently detected UI elements (YOLO / UIA).
@@ -254,12 +293,23 @@ impl SharedState {
             route_type: RouteType::default(),
             conv_messages: Vec::new(),
             pending_tool_id: String::new(),
+            plan_summary: String::new(),
+            final_goal: String::new(),
             todo_steps: Vec::new(),
             current_step_idx: 0,
             current_action: None,
             needs_stability: false,
             needs_approval: false,
             action_user_approved: false,
+            current_loop_mode: StepMode::Chat,
+            mode_switch_requested: None,
+            step_complete: false,
+            last_exec_result: String::new(),
+            step_messages: Vec::new(),
+            step_iterations: 0,
+            step_action_history: Vec::new(),
+            last_action_succeeded: false,
+            last_action_kind: String::new(),
             detected_elements: Vec::new(),
             last_meta: None,
             steps_log: Vec::new(),
@@ -283,5 +333,15 @@ impl SharedState {
         self.needs_stability = false;
         self.needs_approval = false;
         self.action_user_approved = false;
+        self.mode_switch_requested = None;
+        self.step_complete = false;
+        self.last_exec_result.clear();
+        self.step_messages.clear();
+        self.step_iterations = 0;
+        self.step_action_history.clear();
+        self.last_action_succeeded = false;
+        self.last_action_kind.clear();
+        self.plan_summary.clear();
+        self.final_goal.clear();
     }
 }

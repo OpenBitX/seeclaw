@@ -51,14 +51,8 @@ impl Node for ComboExecNode {
         let skill_name = match &step.skill {
             Some(name) => name.clone(),
             None => {
-                tracing::warn!(step = idx, "ComboExecNode: no skill specified — fallback to vlm_act");
-                // Inject description as vlm_goal for the fallback
-                if let Some(s) = state.todo_steps.get_mut(idx) {
-                    if s.vlm_goal.is_none() {
-                        s.vlm_goal = Some(s.description.clone());
-                    }
-                }
-                return Ok(NodeOutput::GoTo("vlm_act".to_string()));
+                tracing::warn!(step = idx, "ComboExecNode: no skill specified — fallback to chat_agent");
+                return Ok(NodeOutput::GoTo("chat_agent".to_string()));
             }
         };
 
@@ -76,14 +70,9 @@ impl Node for ComboExecNode {
             None => {
                 tracing::warn!(
                     skill = %skill_name,
-                    "ComboExecNode: no combo found — fallback to vlm_act"
+                    "ComboExecNode: no combo found — fallback to chat_agent"
                 );
-                if let Some(s) = state.todo_steps.get_mut(idx) {
-                    if s.vlm_goal.is_none() {
-                        s.vlm_goal = Some(s.description.clone());
-                    }
-                }
-                return Ok(NodeOutput::GoTo("vlm_act".to_string()));
+                return Ok(NodeOutput::GoTo("chat_agent".to_string()));
             }
         };
 

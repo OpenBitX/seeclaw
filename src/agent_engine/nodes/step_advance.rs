@@ -64,6 +64,13 @@ impl Node for StepAdvanceNode {
         state.current_action = None;
         state.needs_stability = false;
         state.needs_approval = false;
+        // Reset per-step loop state
+        state.step_complete = false;
+        state.mode_switch_requested = None;
+        state.last_exec_result.clear();
+        state.step_messages.clear();
+        state.step_iterations = 0;
+        state.step_action_history.clear();
 
         Ok(NodeOutput::Continue)
     }

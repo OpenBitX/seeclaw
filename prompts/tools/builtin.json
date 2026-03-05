@@ -230,99 +230,57 @@
     "type": "function",
     "function": {
       "name": "plan_task",
-      "description": "MUST be called first. Produce a step-by-step todo list. Each step has a 'mode' that controls execution: 'combo' runs a pre-defined skill sequence (fastest, zero LLM), 'direct' uses inline tool_calls, 'visual_locate' uses VLM to find a UI element, 'visual_act' uses VLM for complex visual tasks. ALWAYS prefer mode=combo when a matching skill exists.",
+      "description": "MUST be called first. Produce a high-level plan with sub-goals. Each step describes WHAT to achieve with a recommended execution mode. 'combo' runs a pre-defined skill (fastest, zero LLM). 'chat' for terminal/keyboard/file ops without vision. 'vlm' for visual tasks. ALWAYS prefer combo when a matching skill exists.",
       "parameters": {
         "type": "object",
         "properties": {
+          "final_goal": {
+            "type": "string",
+            "description": "Restatement of the user's final goal in clear, specific terms."
+          },
+          "plan_summary": {
+            "type": "string",
+            "description": "1-2 sentence summary of the overall approach."
+          },
           "steps": {
             "type": "array",
-            "description": "Ordered list of steps to execute.",
+            "description": "Ordered list of high-level sub-goals.",
             "items": {
               "type": "object",
               "properties": {
                 "description": {
                   "type": "string",
-                  "description": "Human-readable description of what this step does."
+                  "description": "High-level description of what this step should achieve."
                 },
-                "mode": {
+                "recommended_mode": {
                   "type": "string",
-                  "enum": ["combo", "direct", "visual_locate", "visual_act"],
-                  "description": "Execution mode. combo=pre-defined skill (fastest). direct=inline tool_calls. visual_locate=VLM locates element then executes action. visual_act=VLM autonomous."
+                  "enum": ["combo", "chat", "vlm"],
+                  "description": "Recommended execution mode. combo=pre-defined skill (fastest). chat=terminal/keyboard/file ops. vlm=visual tasks."
+                },
+                "required_skills": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Skill names the executing agent should follow for this step."
+                },
+                "guidance": {
+                  "type": "string",
+                  "description": "Brief hints for the loop agent executing this step (e.g. 'use Win+S to search', 'look for Save button')."
                 },
                 "skill": {
                   "type": "string",
-                  "description": "For mode=combo: skill name (e.g. 'open_software'). Must match an available skill."
+                  "description": "For recommended_mode=combo: exact skill name (e.g. 'open_software')."
                 },
                 "params": {
                   "type": "object",
                   "additionalProperties": true,
-                  "description": "For mode=combo: named parameters the skill requires (e.g. {\"software_name\": \"Chrome\"})."
-                },
-                "tool_calls": {
-                  "type": "array",
-                  "description": "For mode=direct: array of tool calls to execute sequentially.",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "name": {
-                        "type": "string",
-                        "description": "Tool name: mouse_click, type_text, hotkey, key_press, wait, scroll, execute_terminal, etc."
-                      },
-                      "arguments": {
-                        "type": "object",
-                        "additionalProperties": true,
-                        "description": "Tool arguments."
-                      }
-                    },
-                    "required": ["name", "arguments"]
-                  }
-                },
-                "target": {
-                  "type": "string",
-                  "description": "For mode=visual_locate: description of the UI element for VLM to find."
-                },
-                "action_type": {
-                  "type": "string",
-                  "description": "For mode=visual_locate: the action to perform after locating (mouse_click, etc.)."
-                },
-                "vlm_goal": {
-                  "type": "string",
-                  "description": "For mode=visual_act: sub-goal description for VLM autonomous execution."
-                },
-                "needs_viewport": {
-                  "type": "boolean",
-                  "description": "DEPRECATED. Use mode=visual_locate or mode=visual_act instead."
-                },
-                "text": {
-                  "type": "string",
-                  "description": "For direct mode type_text: the text to type."
-                },
-                "keys": {
-                  "type": "string",
-                  "description": "For direct mode hotkey: key combo, e.g. ctrl+c."
-                },
-                "key": {
-                  "type": "string",
-                  "description": "For direct mode key_press: single key name, e.g. Enter."
-                },
-                "command": {
-                  "type": "string",
-                  "description": "For direct mode execute_terminal: the PowerShell command."
-                },
-                "milliseconds": {
-                  "type": "integer",
-                  "description": "For direct mode wait: duration in ms (100–10000)."
-                },
-                "direction": {
-                  "type": "string",
-                  "description": "For direct mode scroll: up, down, left, or right."
+                  "description": "For recommended_mode=combo: named parameters the skill requires."
                 }
               },
-              "required": ["description", "mode"]
+              "required": ["description", "recommended_mode"]
             }
           }
         },
-        "required": ["steps"]
+        "required": ["final_goal", "plan_summary", "steps"]
       }
     }
   },
@@ -338,6 +296,48 @@
           "summary": { "type": "string", "description": "Brief summary of what was accomplished or why it failed." }
         },
         "required": ["completed", "summary"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "finish_step",
+      "description": "Signal that the current sub-goal/step has been completed successfully. Only call when the step's objective is fully achieved.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "summary": { "type": "string", "description": "Brief summary of what was accomplished in this step." }
+        },
+        "required": ["summary"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "switch_to_vlm",
+      "description": "Request switching to VLM (vision) mode. Use when you realize the current task requires visual interaction with the screen (e.g., clicking UI elements, reading screen content).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "reason": { "type": "string", "description": "Why visual mode is needed." }
+        },
+        "required": ["reason"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "switch_to_chat",
+      "description": "Request switching to chat (non-visual) mode. Use when you realize the current task can be done with terminal commands or keyboard shortcuts without needing to see the screen.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "reason": { "type": "string", "description": "Why chat mode is more appropriate." }
+        },
+        "required": ["reason"]
       }
     }
   }

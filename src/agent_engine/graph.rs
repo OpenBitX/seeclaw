@@ -11,6 +11,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
+use std::time::Instant;
 
 use tauri::Emitter;
 
@@ -120,15 +121,17 @@ impl Graph {
 
             // Emit state so frontend can track progress — map node name to UI state kind
             let ui_state = match current.as_str() {
-                "router"       => "routing",
-                "simple_chat"  => "responding",
-                "planner"      => "planning",
-                "vlm_observe"  => "observing",
-                "vlm_act"      => "observing",
-                "summarizer"   => "evaluating",
-                "verifier"     => "evaluating",
-                "user_confirm" => "waiting_for_user",
-                _              => "executing",
+                "router"        => "routing",
+                "simple_chat"   => "responding",
+                "planner"       => "planning",
+                "step_router"   => "routing",
+                "chat_agent"    => "executing",
+                "vlm_act"       => "observing",
+                "step_evaluate" => "evaluating",
+                "summarizer"    => "evaluating",
+                "verifier"      => "evaluating",
+                "user_confirm"  => "waiting_for_user",
+                _               => "executing",
             };
             let _ = ctx.app.emit("agent_state_changed", serde_json::json!({
                 "state": ui_state,
@@ -136,7 +139,16 @@ impl Graph {
             }));
 
             // ── Execute ─────────────────────────────────────────────────
+            let t_start = Instant::now();
             let output = node.execute(state, ctx).await;
+            let elapsed_ms = t_start.elapsed().as_millis();
+
+            tracing::info!(
+                node = %current,
+                elapsed_ms,
+                "[Graph] node '{}' finished in {}ms",
+                current, elapsed_ms
+            );
 
             match output {
                 Ok(NodeOutput::End) => {
@@ -144,19 +156,19 @@ impl Graph {
                     break;
                 }
                 Ok(NodeOutput::GoTo(target)) => {
-                    tracing::debug!(from = %current, to = %target, "graph: GoTo");
+                    tracing::info!(from = %current, to = %target, elapsed_ms, "[Graph] {} → {} ({}ms)", current, target, elapsed_ms);
                     current = target;
                 }
                 Ok(NodeOutput::Continue) => {
                     // Resolve next node via edge
                     match self.edges.get(&current) {
                         Some(Edge::Static { to }) => {
-                            tracing::debug!(from = %current, to = %to, "graph: static edge");
+                            tracing::info!(from = %current, to = %to, elapsed_ms, "[Graph] {} → {} (static, {}ms)", current, to, elapsed_ms);
                             current = to.clone();
                         }
                         Some(Edge::Conditional { router }) => {
                             let next = router(state);
-                            tracing::debug!(from = %current, to = %next, "graph: conditional edge");
+                            tracing::info!(from = %current, to = %next, elapsed_ms, "[Graph] {} → {} (conditional, {}ms)", current, next, elapsed_ms);
                             current = next;
                         }
                         None => {

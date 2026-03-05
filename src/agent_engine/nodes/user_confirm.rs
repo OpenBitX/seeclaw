@@ -62,7 +62,7 @@ impl Node for UserConfirmNode {
                 state.current_action = None;
                 state.needs_approval = false;
                 // Skip this step
-                Ok(NodeOutput::GoTo("step_advance".to_string()))
+                Ok(NodeOutput::GoTo("step_evaluate".to_string()))
             }
             _ => {
                 // Unexpected event — re-wait by going to self

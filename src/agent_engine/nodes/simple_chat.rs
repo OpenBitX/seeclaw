@@ -86,6 +86,21 @@ impl Node for SimpleChatNode {
 
         let answer = response.content.trim().to_string();
 
+        // ── Log LLM response (truncated) ────────────────────────────────
+        {
+            let content_preview = if answer.len() > 100 {
+                format!("{}…", &answer[..100])
+            } else {
+                answer.clone()
+            };
+            tracing::info!(
+                content_len = answer.len(),
+                content = %content_preview,
+                "[SimpleChat] response: '{}'",
+                content_preview
+            );
+        }
+
         // Emit Done to close the stream on the frontend
         let _ = ctx.app.emit(
             "llm_stream_chunk",

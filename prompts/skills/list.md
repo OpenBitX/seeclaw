@@ -1,43 +1,29 @@
-# Default Enabled Skills
+# Skills Index
 
-This file lists the skills that are enabled by default for the Agent.
+Skills are pre-defined deterministic action sequences (combos) that the agent can execute with zero LLM calls — the fastest and most reliable execution path.
 
-## Format
-Each skill is referenced by its relative path from the skills directory.
+## File Format
 
-## Default Skills
+Each skill is a single `.skill.json` file containing:
+- `name` — unique identifier
+- `description` — what the skill does (shown to Planner)
+- `params` — named parameters the combo accepts
+- `triggers` — keyword hints for when this skill applies (shown to Planner)
+- `steps` — ordered action sequence with `{param}` placeholders
 
-- `os/open_software.md`
-- `os/file_operations.md`
-- `web/browser_actions.md`
-
-## Skill Categories
+## Enabled Skills
 
 ### OS Operations
-- `os/open_software.md` - Open and manage software applications
-- `os/file_operations.md` - File and folder operations
-- `os/system_settings.md` - System settings and configuration
+- `os/open_software` — 通过 Win+S 系统搜索打开任意 Windows 软件应用
+- `os/file_operations` — Windows 文件/文件夹操作，包括打开资源管理器、导航目录
 
 ### Web Operations
-- `web/browser_actions.md` - Browser navigation and interaction
-- `web/search.md` - Web search functionality
+- `web/browser_actions` — 浏览器导航和交互，包括打开 URL、刷新、标签页管理
+- `web/browser_search` — 在浏览器地址栏中搜索关键词
 
-### Development
-- `dev/git_operations.md` - Git version control
-- `dev/code_editor.md` - Code editor operations
+## How Skills Are Used
 
-## How to Enable/Disable Skills
-
-Skills can be enabled/disabled through:
-1. User settings in the UI
-2. Configuration file
-3. Planner context (dynamic loading)
-
-## Skill Metadata
-
-Each skill file must contain:
-- `name`: Skill identifier
-- `description`: What the skill does
-- `example`: Usage example
-- `rules`: Execution rules and constraints
-- `role`: When to use this skill
+1. **Planner** sees skill summaries (name + description + triggers) to recommend `combo` mode
+2. **StepRouter** checks skill triggers to auto-detect combo matches
+3. **ComboExecNode** loads the full `.skill.json` and expands `{param}` placeholders
+4. **StepEvaluate** verifies combo success; on failure, falls back to VLM loop

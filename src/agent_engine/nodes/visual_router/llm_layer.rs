@@ -91,11 +91,12 @@ impl VisualDecisionLayer for VisualLlmLayer {
                     Ok(v) => {
                         let needs_visual = v["needs_visual"].as_bool().unwrap_or(false);
                         let confidence = v["confidence"].as_f64().unwrap_or(0.7) as f32;
-                        tracing::debug!(
+                        tracing::info!(
                             layer = "visual_llm",
                             needs_visual,
                             confidence,
-                            "visual decision from LLM"
+                            "[VisualRouter] decision: needs_visual={} confidence={}",
+                            needs_visual, confidence
                         );
                         Some(VisualDecisionResult { needs_visual, confidence })
                     }

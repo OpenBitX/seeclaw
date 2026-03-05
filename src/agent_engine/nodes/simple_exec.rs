@@ -45,6 +45,25 @@ impl Node for SimpleExecNode {
         }
 
         tracing::info!(goal = %state.goal, "SimpleExecNode: generating tool call");
+
+        // ── Pre-flight check: tasks involving visual GUI actions (click, drag,
+        // etc.) CANNOT be handled by SimpleExec because this node has no
+        // vision. Escalate immediately to ComplexVisual → Planner → VLM
+        // instead of wasting 10-30s on an LLM call that will inevitably fail
+        // or produce a terminal-command workaround.
+        if needs_vision(&state.goal) {
+            tracing::info!(
+                goal = %state.goal,
+                "SimpleExecNode: task requires vision (click/GUI element) — escalating to ComplexVisual"
+            );
+            let _ = ctx.app.emit(
+                "agent_activity",
+                serde_json::json!({ "text": "该任务需要视觉，切换到视觉模式…" }),
+            );
+            state.route_type = RouteType::ComplexVisual;
+            return Ok(NodeOutput::GoTo("planner".to_string()));
+        }
+
         let _ = ctx
             .app
             .emit("agent_activity", serde_json::json!({ "text": "正在执行简单任务…" }));
@@ -64,9 +83,25 @@ impl Node for SimpleExecNode {
             },
         ];
 
-        // Load the full builtin tool set — SimpleExec picks the right one from it.
-        // The focused system prompt ensures only a single action is generated.
-        let tools = load_builtin_tools().map_err(|e| e.to_string())?;
+        // Load builtin tools, but FILTER OUT internal loop-control tools that
+        // only make sense inside the step loop (chat_agent / vlm_act). If they
+        // leak here, the LLM will try to call switch_to_vlm instead of doing the
+        // actual single-step action.
+        let tools = load_builtin_tools()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .filter(|t| {
+                let name = &t.function.name;
+                !matches!(
+                    name.as_str(),
+                    "plan_task"
+                        | "evaluate_completion"
+                        | "finish_step"
+                        | "switch_to_vlm"
+                        | "switch_to_chat"
+                )
+            })
+            .collect::<Vec<_>>();
 
         let (provider, mut cfg) = {
             let reg = ctx.registry.lock().await;
@@ -88,6 +123,18 @@ impl Node for SimpleExecNode {
             return Ok(NodeOutput::End);
         }
 
+        // ── Log LLM response (truncated) ────────────────────────────────
+        {
+            let tool_name = response.tool_calls.first().map(|tc| tc.function.name.as_str()).unwrap_or("(none)");
+            let content_preview = truncate(response.content.trim(), 100);
+            tracing::info!(
+                tool = tool_name,
+                content = %content_preview,
+                "[SimpleExec] response: tool={} content='{}'",
+                tool_name, content_preview
+            );
+        }
+
         if let Some(tc) = response.tool_calls.into_iter().next() {
             match parse_tool_call_to_action(&tc) {
                 Ok(action) => {
@@ -106,8 +153,35 @@ impl Node for SimpleExecNode {
             tracing::warn!("SimpleExecNode: LLM returned no tool call — escalating to planner");
         }
 
-        // Fallback: promote to the full Complex planning path rather than silently dropping the task.
-        state.route_type = RouteType::Complex;
+        // Fallback: promote to the full planning path.
+        // Use ComplexVisual (not Complex) because a Simple-route that failed
+        // typically needs vision context (e.g. "click desktop icon" requires
+        // a screenshot to know WHERE to click).
+        state.route_type = RouteType::ComplexVisual;
         Ok(NodeOutput::GoTo("planner".to_string()))
     }
+}
+
+/// Truncate to `max` chars with "…" if longer (for log display).
+fn truncate(s: &str, max: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() > max {
+        format!("{}…", chars[..max].iter().collect::<String>())
+    } else {
+        s.to_string()
+    }
+}
+
+/// Pre-flight heuristic: does this task require visual perception?
+/// If it mentions clicking, dragging, or interacting with GUI elements
+/// by visual reference, SimpleExec (text-only) cannot handle it.
+fn needs_vision(goal: &str) -> bool {
+    let goal_lower = goal.to_lowercase();
+    let click_patterns = [
+        "点击", "双击", "右键", "单击",
+        "click", "double click", "right click",
+        "图标", "icon", "按钮", "button",
+        "拖拽", "drag", "拖动",
+    ];
+    click_patterns.iter().any(|p| goal_lower.contains(p))
 }

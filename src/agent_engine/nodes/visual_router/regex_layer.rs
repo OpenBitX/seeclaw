@@ -57,9 +57,9 @@ impl VisualDecisionLayer for VisualRegexLayer {
         todo_steps: &[TodoStep],
         _ctx: &NodeContext,
     ) -> Option<VisualDecisionResult> {
-        // VisualAct steps = agent was doing autonomous visual reasoning → definitely needs visual
-        if todo_steps.iter().any(|s| s.mode == StepMode::VisualAct) {
-            tracing::debug!(layer = "visual_regex", "VisualAct step detected → needs_visual=true");
+        // Vlm steps = agent was doing autonomous visual reasoning → definitely needs visual
+        if todo_steps.iter().any(|s| s.mode == StepMode::Vlm) {
+            tracing::debug!(layer = "visual_regex", "Vlm step detected → needs_visual=true");
             return Some(VisualDecisionResult { needs_visual: true, confidence: 1.0 });
         }
 

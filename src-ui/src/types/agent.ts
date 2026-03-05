@@ -75,9 +75,12 @@ export interface Message {
 
 export interface ViewportCapturedPayload {
   image_base64: string;
-  grid_n: number;
-  physical_width: number;
-  physical_height: number;
+  /** Grid size — present in vlm_act captures, absent in planner_initial captures */
+  grid_n?: number;
+  physical_width?: number;
+  physical_height?: number;
+  /** Optional source tag for debugging (e.g. 'planner_initial') */
+  source?: string;
 }
 
 export interface ApprovalRequest {
@@ -99,12 +102,19 @@ export interface AgentStatePayload {
 // ── TodoList types (from backend plan_task) ────────────────────────────────
 
 export type StepStatus = 'Pending' | 'InProgress' | 'Completed' | 'Failed' | 'Skipped';
-export type StepMode = 'Direct' | 'VisualLocate' | 'VisualAct';
+/**
+ * Execution mode for a step — matches Rust StepMode (snake_case serde).
+ * Previous values ('Direct' | 'VisualLocate' | 'VisualAct') were from the old arch.
+ */
+export type StepMode = 'combo' | 'chat' | 'vlm';
 
 export interface TodoStep {
   index: number;
   description: string;
+  /** Actual mode selected by StepRouter at runtime */
   mode: StepMode;
+  /** Planner's recommended mode hint */
+  recommended_mode?: StepMode;
   status: StepStatus;
 }
 
@@ -117,7 +127,9 @@ export interface TodoListPayload {
 export interface StepStartedPayload {
   index: number;
   description: string;
+  /** Actual mode (matches 'mode' field from step_router step_started event) */
   mode: StepMode;
+  recommended_mode?: StepMode;
 }
 
 export interface StepCompletedPayload {

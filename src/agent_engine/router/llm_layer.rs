@@ -37,19 +37,22 @@ impl RouterLayer for LlmLayer {
             match reg.call_config_for_role("routing") {
                 Ok(pair) => pair,
                 Err(e) => {
-                    tracing::warn!(error = %e, "routing provider not configured — defaulting to Complex");
+                    tracing::warn!(error = %e, "routing provider not configured — defaulting to Chat");
                     return Some(RouteResult {
-                        route_type: RouteType::Complex,
-                        confidence: 0.5,
+                        route_type: RouteType::Chat,
+                        confidence: 0.3,
                     });
                 }
             }
         };
 
-        // Use non-streaming, silent call for routing with JSON mode enabled
+        // Use non-streaming, silent call for routing.
+        // NOTE: Do NOT enable json_mode here — many lightweight models
+        // (e.g. doubao-seed-2-0-mini) do not support response_format json_object
+        // and will return InvalidParameter, causing routing to always fail.
         cfg.stream = false;
         cfg.silent = true;
-        cfg.json_mode = true;
+        cfg.json_mode = false;
 
         let messages = vec![
             ChatMessage {
@@ -69,7 +72,7 @@ impl RouterLayer for LlmLayer {
         match provider.chat(messages, vec![], &cfg, &ctx.app).await {
             Ok(response) => {
                 let raw = response.content.trim();
-                tracing::debug!(layer = "llm", raw = %raw, "router LLM response");
+                tracing::info!(layer = "llm", raw = %raw, "[Router] LLM response");
 
                 // Parse the response JSON: { "route_type": "simple"|"complex", "tool_calls": [...] }
                 let json_str = raw
@@ -83,7 +86,9 @@ impl RouterLayer for LlmLayer {
                         let route_type = match v["route_type"].as_str() {
                             Some("chat") => RouteType::Chat,
                             Some("simple") => RouteType::Simple,
-                            _ => RouteType::Complex,
+                            Some("complex_visual") => RouteType::ComplexVisual,
+                            Some("complex") => RouteType::Complex,
+                            _ => RouteType::Chat, // safe default
                         };
 
                         Some(RouteResult {
@@ -92,19 +97,19 @@ impl RouterLayer for LlmLayer {
                         })
                     }
                     Err(e) => {
-                        tracing::warn!(error = %e, raw = %json_str, "router LLM JSON parse failed — defaulting to Complex");
+                        tracing::warn!(error = %e, raw = %json_str, "router LLM JSON parse failed — defaulting to Chat");
                         Some(RouteResult {
-                            route_type: RouteType::Complex,
-                            confidence: 0.5,
+                            route_type: RouteType::Chat,
+                            confidence: 0.3,
                         })
                     }
                 }
             }
             Err(e) => {
-                tracing::warn!(error = %e, "router LLM call failed — defaulting to Complex");
+                tracing::warn!(error = %e, "router LLM call failed — defaulting to Chat (safe fallback)");
                 Some(RouteResult {
-                    route_type: RouteType::Complex,
-                    confidence: 0.5,
+                    route_type: RouteType::Chat,
+                    confidence: 0.3,
                 })
             }
         }

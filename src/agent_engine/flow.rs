@@ -14,55 +14,45 @@ use crate::agent_engine::state::RouteType;
 ///  │  router   │
 ///  └────┬──────┘
 ///       │ conditional: route_type
-///       ├─ Chat ────────────────────┐
-///       │                           ▼
-///       │                   ┌──────────────┐
-///       │                   │ simple_chat  │ ← lightweight LLM: no tools, just reply
-///       │                   └──────┬───────┘
-///       │                          ▼
-///       │                        (end)
-///       │
-///       ├─ Simple ──────────────────┐
-///       │                           ▼
-///       │                   ┌──────────────┐
-///       │                   │ simple_exec  │ ← lightweight LLM: 1 tool call
-///       │                   └──────┬───────┘
-///       │                          │
-///       │                          ▼
-///       │                   ┌──────────────┐
-///       │                   │  action_exec  │
-///       │                   └──────┬───────┘
-///       │                          │ todo_steps empty → summarizer
-///       │                          ▼
-///       │                   ┌──────────────┐
-///       │                   │  summarizer   │ ← LLM generates human answer
-///       │                   └──────┬───────┘
-///       │                          ▼
-///       │                        (end)
-///       │
-///       └─ Complex ─────────┐
-///                           ▼
-///                    ┌──────────┐
-///                    │ planner  │ ← LLM generates todo_steps (sees skill manifests only)
-///                    └────┬─────┘
-///                         │
-///                         ▼
-///                  ┌──────────────┐
-///                  │ step_dispatch │ ← routes by StepMode
-///                  └──────┬───────┘
-///                    ┌────┤
-///                    │    ├─ Combo ──→ combo_exec → step_advance (zero LLM)
-///                    │    ├─ Direct → direct_exec → action_exec
-///                    │    ├─ VisualLocate → vlm_observe → action_exec
-///                    │    └─ VisualAct → vlm_act → action_exec
-///                    │
-///                    step_advance
-///                         │ conditional: more steps?
-///                         ├─ step_dispatch (loop)
-///                         └─ verifier
-///                              │
-///                              ├─ pass → summarizer → (end)
-///                              └─ fail → planner (replan)
+///       ├─ Chat ─────────────────→ simple_chat → (end)
+///       ├─ Simple ───────────────→ simple_exec → action_exec → summarizer → (end)
+///       ├─ Complex ──────────────→ planner ──┐
+///       └─ ComplexVisual ────────→ planner ──┘
+///                                      │
+///                                      ▼
+///                               ┌──────────────┐
+///                               │  step_router  │ ← decides mode per step
+///                               └──────┬───────┘
+///                                 ┌────┤
+///                                 │    ├─ Combo ──→ combo_exec → step_advance
+///                                 │    ├─ Chat  ──→ chat_agent ──┐
+///                                 │    └─ Vlm   ──→ vlm_act ────┘
+///                                 │                       │
+///                                 │                       ▼
+///                                 │               ┌──────────────┐
+///                                 │               │  action_exec  │ ← executes one action
+///                                 │               └──────┬───────┘
+///                                 │                      │
+///                                 │                      ▼
+///                                 │              ┌───────────────┐
+///                                 │              │ step_evaluate  │ ← inner loop control
+///                                 │              └───────┬───────┘
+///                                 │                      │
+///                                 │    ┌─────────────────┤
+///                                 │    │ step_complete    │ continue loop
+///                                 │    ▼                  ▼
+///                                 │  step_advance    chat_agent / vlm_act
+///                                 │    │
+///                                 │    │ conditional: more steps?
+///                                 │    ├─ yes → step_router (loop)
+///                                 │    └─ no  → verifier
+///                                 │                │
+///                                 │    ┌───────────┤
+///                                 │    ▼           ▼
+///                                 │ summarizer   planner (replan)
+///                                 │    │
+///                                 │    ▼
+///                                 │  (end)
 /// ```
 pub fn build_default_flow() -> Graph {
     let mut graph = Graph::new();
@@ -79,6 +69,7 @@ pub fn build_default_flow() -> Graph {
             RouteType::Chat => "simple_chat".to_string(),
             RouteType::Simple => "simple_exec".to_string(),
             RouteType::Complex => "planner".to_string(),
+            RouteType::ComplexVisual => "planner".to_string(),
         }
     });
 
@@ -86,67 +77,61 @@ pub fn build_default_flow() -> Graph {
     // SimpleChatNode always returns End — no outgoing edge needed.
 
     // ── SimpleExec → action_exec ─────────────────────────────────────
-    // SimpleExecNode sets state.current_action and returns Continue.
-    // On failure it returns GoTo("planner") to escalate.
     graph.add_edge("simple_exec", "action_exec");
 
-    // ── Planner → step_dispatch (node itself returns GoTo or End) ───────
-    // Planner returns End for FinishTask/ReportFailure, Continue otherwise.
-    graph.add_edge("planner", "step_dispatch");
+    // ── Planner → step_router (node itself returns GoTo or End) ─────────
+    graph.add_edge("planner", "step_router");
 
-    // ── StepDispatch → GoTo target (combo_exec / direct_exec / vlm_observe / vlm_act)
-    // StepDispatchNode uses GoTo(), so no edge needed here — but we add a
-    // fallback static edge just in case.
-    graph.add_edge("step_dispatch", "combo_exec");
+    // ── StepRouter → GoTo target (combo_exec / chat_agent / vlm_act)
+    // StepRouterNode uses GoTo(), so no static edge strictly needed,
+    // but we add a fallback.
+    graph.add_edge("step_router", "chat_agent");
 
-    // ── ComboExec → step_advance (combo bypasses action_exec entirely) ──
-    // ComboExecNode uses GoTo("step_advance") on success, GoTo("vlm_act") on fallback.
+    // ── ComboExec → step_advance (combo bypasses the inner loop) ────────
     graph.add_edge("combo_exec", "step_advance");
 
-    // ── DirectExec → action_exec ────────────────────────────────────────
-    graph.add_edge("direct_exec", "action_exec");
+    // ── ChatAgent → action_exec (Continue = go execute the action) ──────
+    // ChatAgent may also GoTo("step_evaluate") or GoTo("step_router").
+    graph.add_edge("chat_agent", "action_exec");
 
-    // ── VlmObserve → action_exec (Continue) ─────────────────────────────
-    graph.add_edge("vlm_observe", "action_exec");
-
-    // ── VlmAct → action_exec (Continue) ─────────────────────────────────
+    // ── VlmAct → action_exec (Continue = go execute the action) ─────────
+    // VlmAct may also GoTo("step_evaluate") or GoTo("step_router").
     graph.add_edge("vlm_act", "action_exec");
 
-    // ── ActionExec → conditional: approval / stability / step_advance ───
+    // ── ActionExec → conditional: approval / stability / step_evaluate ──
     graph.add_conditional_edge("action_exec", |state| {
         if state.needs_approval {
             "user_confirm".to_string()
+        } else if state.todo_steps.is_empty() {
+            // Simple route or direct action from planner: no todo_steps → go to summarizer
+            "summarizer".to_string()
         } else if state.needs_stability {
             "stability".to_string()
-        } else if state.todo_steps.is_empty() {
-            // Simple route: no todo_steps → skip step_advance/verifier, go
-            // straight to the summarizer which generates a human-readable answer.
-            "summarizer".to_string()
         } else {
-            "step_advance".to_string()
+            "step_evaluate".to_string()
         }
     });
 
     // ── UserConfirm → action_exec (node uses GoTo) ─────────────────────
-    // UserConfirmNode returns GoTo("action_exec") or GoTo("step_advance"),
-    // so this is a fallback.
     graph.add_edge("user_confirm", "action_exec");
 
-    // ── Stability → step_advance ────────────────────────────────────────
-    graph.add_edge("stability", "step_advance");
+    // ── Stability → step_evaluate ───────────────────────────────────────
+    graph.add_edge("stability", "step_evaluate");
+
+    // ── StepEvaluate → conditional: loop back or advance ────────────────
+    // StepEvaluateNode uses GoTo() for all routing. Fallback:
+    graph.add_edge("step_evaluate", "step_advance");
 
     // ── StepAdvance → conditional: more steps or verifier ───────────────
     graph.add_conditional_edge("step_advance", |state| {
         if state.current_step_idx < state.todo_steps.len() {
-            "step_dispatch".to_string()
+            "step_router".to_string()
         } else {
             "verifier".to_string()
         }
     });
 
-    // ── Verifier → summarizer (pass) or planner (fail) ───────────────────
-    // VerifierNode returns GoTo("summarizer") on pass, GoTo("planner") on fail.
-    // Fallback static edge points to summarizer in case the node returns Continue.
+    // ── Verifier → summarizer (pass) or planner (fail) ──────────────────
     graph.add_edge("verifier", "summarizer");
 
     // ── Summarizer → end (always) ──────────────────────────────────────

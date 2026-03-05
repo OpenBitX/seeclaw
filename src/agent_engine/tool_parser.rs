@@ -4,7 +4,7 @@
 //! reusable across multiple nodes (PlannerNode, DirectExecNode, VlmActNode).
 
 use crate::agent_engine::state::{
-    AgentAction, StepMode, StepStatus, TodoStep, ToolCallData,
+    AgentAction, StepMode, StepStatus, TodoStep,
 };
 use crate::llm::types::ToolCall;
 
@@ -164,7 +164,34 @@ pub fn extract_cell_label_from_text(text: &str) -> Option<String> {
 // ── Internal ───────────────────────────────────────────────────────────────
 
 /// Parse `plan_task` arguments into `AgentAction::PlanTask`.
+///
+/// New format from Planner:
+/// ```json
+/// {
+///   "final_goal": "...",
+///   "plan_summary": "...",
+///   "steps": [
+///     {
+///       "description": "...",
+///       "recommended_mode": "combo|chat|vlm",
+///       "required_skills": ["skill_name"],
+///       "guidance": "optional hint for the loop agent",
+///       "skill": "skill_name (for combo mode)",
+///       "params": { ... }
+///     }
+///   ]
+/// }
+/// ```
 fn parse_plan_task(args: &serde_json::Value) -> Result<AgentAction, String> {
+    let final_goal = args["final_goal"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    let plan_summary = args["plan_summary"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+
     // Tolerate steps being a JSON string instead of an array
     let steps_val = &args["steps"];
     let raw_steps: Vec<serde_json::Value> = if let Some(arr) = steps_val.as_array() {
@@ -178,100 +205,48 @@ fn parse_plan_task(args: &serde_json::Value) -> Result<AgentAction, String> {
 
     let mut steps = Vec::new();
     for (i, s) in raw_steps.iter().enumerate() {
-        // Determine step mode: new field "mode" or legacy "needs_viewport" fallback
-        let mode = match s["mode"].as_str() {
+        // Parse recommended_mode
+        let recommended_mode = match s["recommended_mode"].as_str() {
             Some("combo") => StepMode::Combo,
-            Some("visual_locate") => StepMode::VisualLocate,
-            Some("visual_act") => StepMode::VisualAct,
-            Some("direct") => StepMode::Direct,
-            _ => {
-                // Legacy fallback: needs_viewport maps to VisualLocate
-                if s["needs_viewport"].as_bool().unwrap_or(false) {
-                    StepMode::VisualLocate
-                } else {
-                    StepMode::Direct
-                }
-            }
+            Some("vlm") => StepMode::Vlm,
+            _ => StepMode::Chat, // default to Chat
         };
 
-        // Parse tool_calls for Direct mode
-        let tool_calls = if mode == StepMode::Direct {
-            parse_step_tool_calls(s, i)
-        } else {
-            Vec::new()
-        };
+        // Parse required_skills
+        let required_skills = s["required_skills"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
 
-        // Parse skill + params for Combo mode
+        // Parse skill + params for combo mode
         let skill = s["skill"].as_str().map(|t| t.to_string());
-        let params = if mode == StepMode::Combo {
-            s.get("params").cloned()
-        } else {
-            None
-        };
+        let params = s.get("params").cloned();
 
-        // Parse action_template for VisualLocate mode
-        let action_template = if mode == StepMode::VisualLocate {
-            let action_type = s["action_type"]
-                .as_str()
-                .or_else(|| s["action"]["type"].as_str())
-                .unwrap_or("mouse_click");
-            let mut step_args = s.clone();
-            if step_args.is_object() {
-                step_args["element_id"] = serde_json::json!("");
-            }
-            parse_action_by_name(action_type, &step_args).ok()
-        } else {
-            None
-        };
+        // Parse guidance
+        let guidance = s["guidance"].as_str().map(|g| g.to_string());
 
         steps.push(TodoStep {
             index: i,
             description: s["description"].as_str().unwrap_or("").to_string(),
-            mode,
+            recommended_mode: recommended_mode.clone(),
+            mode: recommended_mode, // StepRouter may override at runtime
+            required_skills,
+            guidance,
             skill,
             params,
-            tool_calls,
-            target: s["target"].as_str().map(|t| t.to_string()),
-            action_template,
-            vlm_goal: s["vlm_goal"].as_str().map(|g| g.to_string()),
             status: StepStatus::Pending,
         });
     }
 
-    Ok(AgentAction::PlanTask { steps })
-}
-
-/// Parse the tool_calls array from a step, or build one from legacy action_type field.
-fn parse_step_tool_calls(step: &serde_json::Value, idx: usize) -> Vec<ToolCallData> {
-    // New format: explicit tool_calls array
-    if let Some(tcs) = step["tool_calls"].as_array() {
-        return tcs
-            .iter()
-            .filter_map(|tc| {
-                let name = tc["name"].as_str()?.to_string();
-                let arguments = tc.get("arguments").cloned().unwrap_or(serde_json::json!({}));
-                Some(ToolCallData { name, arguments })
-            })
-            .collect();
-    }
-
-    // Legacy format: single action_type field
-    let action_type = step["action_type"]
-        .as_str()
-        .or_else(|| step["action"]["type"].as_str());
-
-    if let Some(name) = action_type {
-        vec![ToolCallData {
-            name: name.to_string(),
-            arguments: step.clone(),
-        }]
-    } else {
-        tracing::warn!(step = idx, "no tool_calls or action_type in step, defaulting to wait");
-        vec![ToolCallData {
-            name: "wait".to_string(),
-            arguments: serde_json::json!({ "milliseconds": 500 }),
-        }]
-    }
+    Ok(AgentAction::PlanTask {
+        final_goal,
+        plan_summary,
+        steps,
+    })
 }
 
 /// Helper to extract a string field with empty-string default.
