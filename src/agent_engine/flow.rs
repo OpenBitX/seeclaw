@@ -5,7 +5,7 @@
 
 use crate::agent_engine::graph::Graph;
 use crate::agent_engine::nodes;
-use crate::agent_engine::state::RouteType;
+use crate::agent_engine::state::{RouteType, StepStatus};
 
 /// Build the default agent graph with all nodes and edges.
 ///
@@ -122,12 +122,22 @@ pub fn build_default_flow() -> Graph {
     // StepEvaluateNode uses GoTo() for all routing. Fallback:
     graph.add_edge("step_evaluate", "step_advance");
 
-    // ── StepAdvance → conditional: more steps or verifier ───────────────
+    // ── StepAdvance → conditional: more steps, verifier, or skip verifier ──
     graph.add_conditional_edge("step_advance", |state| {
         if state.current_step_idx < state.todo_steps.len() {
             "step_router".to_string()
         } else {
-            "verifier".to_string()
+            // All steps done — check if any failed.
+            // If all succeeded, skip verifier (saves one VLM call + screenshot).
+            let has_failure = state.todo_steps.iter().any(|s| {
+                matches!(s.status, StepStatus::Failed | StepStatus::Skipped)
+            });
+            if has_failure {
+                "verifier".to_string()
+            } else {
+                tracing::info!("[StepAdvance] all steps succeeded → skip verifier → summarizer");
+                "summarizer".to_string()
+            }
         }
     });
 

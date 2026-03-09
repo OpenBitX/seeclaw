@@ -10,7 +10,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
-use crate::llm::types::ChatMessage;
+use crate::llm::types::{ChatMessage, ContentPart, MessageContent};
 use crate::perception::types::{ScreenshotMeta, UIElement};
 
 // ── Route type ─────────────────────────────────────────────────────────────
@@ -326,7 +326,31 @@ impl SharedState {
     }
 
     /// Reset state for a new planning cycle (keeps goal and conv_messages).
+    /// Strips images from conv_messages to prevent token waste on replan.
     pub fn reset_for_replan(&mut self) {
+        // Strip all images from conv_messages before replan — they're stale
+        // and would waste tokens. Keep the text content for context continuity.
+        for msg in &mut self.conv_messages {
+            if let MessageContent::Parts(ref mut parts) = msg.content {
+                let mut new_parts = Vec::new();
+                let mut had_image = false;
+                for part in parts.drain(..) {
+                    match part {
+                        ContentPart::ImageUrl { .. } => {
+                            if !had_image {
+                                new_parts.push(ContentPart::Text {
+                                    text: "[Screenshot from previous cycle — stripped]".to_string(),
+                                });
+                                had_image = true;
+                            }
+                        }
+                        other => new_parts.push(other),
+                    }
+                }
+                *parts = new_parts;
+            }
+        }
+
         self.todo_steps.clear();
         self.current_step_idx = 0;
         self.current_action = None;

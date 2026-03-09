@@ -1,7 +1,18 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cargo check:*)"
+      "Bash(cargo check:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(curl:*)",
+      "WebSearch",
+      "WebFetch(domain:openai.com)",
+      "WebFetch(domain:www.riis.com)",
+      "WebFetch(domain:emergentmind.com)",
+      "WebFetch(domain:cua.ai)",
+      "WebFetch(domain:platform.openai.com)",
+      "WebFetch(domain:arslnb.com)",
+      "WebFetch(domain:www.trycua.com)",
+      "mcp__ide__getDiagnostics"
     ]
   }
 }

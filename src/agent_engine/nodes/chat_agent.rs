@@ -11,7 +11,7 @@ use tauri::Emitter;
 
 use crate::agent_engine::context::NodeContext;
 use crate::agent_engine::node::{poll_stop, Node, NodeOutput};
-use crate::agent_engine::state::{SharedState, StepMode};
+use crate::agent_engine::state::{SharedState, StepMode, StepStatus};
 use crate::agent_engine::tool_parser::parse_action_by_name;
 use crate::llm::tools::load_builtin_tools;
 use crate::llm::types::{ChatMessage, MessageContent};
@@ -168,7 +168,17 @@ impl Node for ChatAgentNode {
                 // Step completion signal
                 "finish_step" => {
                     let summary = args["summary"].as_str().unwrap_or("Step completed");
-                    tracing::info!(step = idx, iter, summary = %summary, "[ChatAgent] ✅ finish_step after {} iters: '{}'", iter, summary);
+                    let is_failure = summary_indicates_failure(summary);
+                    if is_failure {
+                        tracing::warn!(step = idx, iter, summary = %summary,
+                            "[ChatAgent] ⚠ finish_step with FAILURE after {} iters: '{}'", iter, summary);
+                        if let Some(step) = state.todo_steps.get_mut(idx) {
+                            step.status = StepStatus::Failed;
+                        }
+                    } else {
+                        tracing::info!(step = idx, iter, summary = %summary,
+                            "[ChatAgent] ✅ finish_step after {} iters: '{}'", iter, summary);
+                    }
                     state.step_complete = true;
                     state.last_exec_result = summary.to_string();
                     state.steps_log.push(format!(
@@ -223,4 +233,15 @@ fn truncate(s: &str, max: usize) -> String {
     } else {
         s.to_string()
     }
+}
+
+/// Detect if a finish_step summary indicates failure rather than success.
+fn summary_indicates_failure(summary: &str) -> bool {
+    let lower = summary.to_lowercase();
+    let failure_keywords = [
+        "fail", "unable", "cannot", "could not", "couldn't",
+        "not found", "not able", "impossible", "error",
+        "失败", "无法", "找不到", "未能", "不能",
+    ];
+    failure_keywords.iter().any(|kw| lower.contains(kw))
 }
